@@ -1,17 +1,18 @@
 package main
 
 import "core:fmt"
-import glm "core:math/linalg/glsl"
 import "core:time"
+import "core:os"
+
+import glm "core:math/linalg/glsl"
 
 import SDL "vendor:sdl2"
 import gl "vendor:OpenGL"
 
-GL_VERSION_MAJOR :: 3
-GL_VERSION_MINOR :: 3
+import "formats:spall"
+
 
 vertex_source := `#version 330 core
-
 layout(location=0) in vec3 a_position;
 layout(location=1) in vec4 a_color;
 
@@ -26,7 +27,6 @@ void main() {
 `
 
 fragment_source := `#version 330 core
-
 in vec4 v_color;
 
 out vec4 o_color;
@@ -36,18 +36,105 @@ void main() {
 }
 `
 
+push_fatal :: proc(err: SpallError) -> ! {
+	fmt.eprintf("Error: %v\n", err)
+	os.exit(1)
+}
+
+string_block: [dynamic]u8
+
 main :: proc() {
+	if len(os.args) < 2 {
+		fmt.eprintf("Expected: %v <tracename.spall>\n", os.args[0])
+		os.exit(1)
+	}
+
+	trace_fd, err := os.open(os.args[1])
+	if err != 0 {
+		fmt.printf("Failed to open %s\n", os.args[1])
+		os.exit(1)
+	}
+	total_size, err2 := os.file_size(trace_fd)
+	if err != 0 {
+		fmt.printf("Failed to get file size for %s\n", os.args[1])
+		os.exit(1)
+	}
+
+	CHUNK_BUFFER_SIZE :: 64 * 1024
+	string_block = make([dynamic]u8)
+	chunk_buffer := make([]u8, CHUNK_BUFFER_SIZE)
+
+	rd_sz, err3 := os.read(trace_fd, chunk_buffer)
+	if err2 != 0 {
+		fmt.printf("Failed to read %s\n", os.args[1])
+		os.exit(1)
+	}
+
+	// parse header
+	chunk := chunk_buffer[:rd_sz]
+
+	header_sz := i64(size_of(spall.Header))
+	if i64(len(chunk)) < header_sz {
+		push_fatal(SpallError.InvalidFile)
+	}
+
+	magic := (^u64)(raw_data(chunk))^
+	if magic != spall.MAGIC {
+		push_fatal(SpallError.InvalidFile)
+	}
+
+	hdr := cast(^spall.Header)raw_data(chunk)
+	if hdr.version != 1 {
+		fmt.printf("Your file version (%d) is not supported!\n", hdr.version)
+		push_fatal(SpallError.InvalidFileVersion)
+	}
+	
+	p := init_parser(total_size)
+	p.pos += header_sz
+
+	// loop over the event data
+	for {
+		p.full_chunk = chunk
+		hot_loop: for {
+			ev, state := get_next_event(&p)
+			#partial switch state {
+			case .PartialRead:
+				p.offset = p.pos
+
+				_, err := os.seek(trace_fd, p.offset, os.SEEK_SET)
+				if err != 0 {
+					fmt.printf("Failed to seek %s\n", os.args[1])
+					os.exit(1)
+				}
+				rd_sz, err2 := os.read(trace_fd, chunk_buffer)
+				if err2 != 0 {
+					fmt.printf("Failed to read %s\n", os.args[1])
+					os.exit(1)
+				}
+
+				chunk = chunk_buffer[:rd_sz]
+				break hot_loop
+			case .Finished:
+				os.exit(0)
+			}
+		}
+
+	}
+
+/*
 	WINDOW_WIDTH  :: 640
 	WINDOW_HEIGHT :: 480
 
 	SDL.Init({.VIDEO})
 
-	window := SDL.CreateWindow("Spall", SDL.WINDOWPOS_UNDEFINED, SDL.WINDOWPOS_UNDEFINED, WINDOW_WIDTH, WINDOW_HEIGHT, {.OPENGL})
+	window := SDL.CreateWindow("spall", SDL.WINDOWPOS_UNDEFINED, SDL.WINDOWPOS_UNDEFINED, WINDOW_WIDTH, WINDOW_HEIGHT, {.OPENGL})
 	if window == nil {
 		fmt.eprintln("Failed to create window")
 		return
 	}
 
+	GL_VERSION_MAJOR :: 3
+	GL_VERSION_MINOR :: 3
 	SDL.GL_SetAttribute(.CONTEXT_PROFILE_MASK,  i32(SDL.GLprofile.CORE))
 	SDL.GL_SetAttribute(.CONTEXT_MAJOR_VERSION, GL_VERSION_MAJOR)
 	SDL.GL_SetAttribute(.CONTEXT_MINOR_VERSION, GL_VERSION_MINOR)
@@ -154,4 +241,5 @@ main :: proc() {
 
 		SDL.GL_SwapWindow(window)
 	}
+*/
 }

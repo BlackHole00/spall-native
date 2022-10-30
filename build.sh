@@ -1,4 +1,4 @@
 rm -rf bin
 mkdir bin
 
-odin build src -out:bin/spall
+odin build src -collection:formats=formats -out:bin/spall -o:speed
