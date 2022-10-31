@@ -9,8 +9,8 @@ Parser :: struct {
 	offset: i64,
 	intern: INMap,
 }
-real_pos :: #force_inline proc(p: ^Parser) -> i64 { return p.pos }
-chunk_pos :: #force_inline proc(p: ^Parser) -> i64 { return p.pos - p.offset }
+real_pos :: proc(p: ^Parser) -> i64 { return p.pos }
+chunk_pos :: proc(p: ^Parser) -> i64 { return p.pos - p.offset }
 init_parser :: proc() -> Parser {
 	p := Parser{
 		intern = in_init()
@@ -22,6 +22,7 @@ setup_pid :: proc(trace: ^Trace, process_id: u32) -> int {
 	p_idx, ok := vh_find(&trace.process_map, process_id)
 	if !ok {
 		append(&trace.processes, init_process(process_id))
+
 		p_idx = len(trace.processes) - 1
 		vh_insert(&trace.process_map, process_id, p_idx)
 	}
@@ -33,11 +34,10 @@ setup_tid :: proc(trace: ^Trace, p_idx: int, thread_id: u32) -> int {
 	t_idx, ok := vh_find(&trace.processes[p_idx].thread_map, thread_id)
 	if !ok {
 		threads := &trace.processes[p_idx].threads
-
+		thread_map := &trace.processes[p_idx].thread_map
 		append(threads, init_thread(thread_id))
 
 		t_idx = len(threads) - 1
-		thread_map := &trace.processes[p_idx].thread_map
 		vh_insert(thread_map, thread_id, t_idx)
 	}
 
@@ -45,8 +45,7 @@ setup_tid :: proc(trace: ^Trace, p_idx: int, thread_id: u32) -> int {
 }
 
 load_file :: proc(filename: string) -> Trace {
-	CHUNK_BUFFER_SIZE :: 64 * 1024
-	chunk_buffer := make([]u8, CHUNK_BUFFER_SIZE, context.temp_allocator)
+	chunk_buffer := [1<<17]u8{}
 
 	trace := Trace{
 		processes = make([dynamic]Process),
@@ -70,7 +69,7 @@ load_file :: proc(filename: string) -> Trace {
 		push_fatal(SpallError.InvalidFile)
 	}
 
-	rd_sz, err3 := os.read(trace_fd, chunk_buffer)
+	rd_sz, err3 := os.read(trace_fd, chunk_buffer[:])
 	if err2 != 0 {
 		push_fatal(SpallError.InvalidFile)
 	}
@@ -94,7 +93,7 @@ load_file :: proc(filename: string) -> Trace {
 
 		p := &trace.parser
 		p.pos += header_sz
-		parse_binary(&trace, trace_fd, chunk_buffer, i64(rd_sz), total_size)
+		parse_binary(&trace, trace_fd, chunk_buffer[:], i64(rd_sz), total_size)
 	} else {
 		push_fatal(SpallError.InvalidFile)
 	}

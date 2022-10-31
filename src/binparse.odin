@@ -13,7 +13,7 @@ BinaryState :: enum {
 	Failure,
 }
 
-get_next_event :: #force_no_inline proc(trace: ^Trace, chunk: []u8, temp_ev: ^TempEvent) -> BinaryState {
+get_next_event :: proc(trace: ^Trace, chunk: []u8, temp_ev: ^TempEvent) -> BinaryState {
 	p := &trace.parser
 
 	header_sz := i64(size_of(u64))
@@ -94,7 +94,7 @@ bin_push_event :: proc(trace: ^Trace, process_id, thread_id: u32, event: ^Event)
 	return p_idx, t_idx, len(depth.bs_events)-1
 }
 
-parse_binary :: #force_inline proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size, total_size: i64) {
+parse_binary :: proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size, total_size: i64) {
 	temp_ev := TempEvent{}
 	ev := Event{}
 	p := &trace.parser

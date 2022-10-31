@@ -122,7 +122,7 @@ init_process :: proc(process_id: u32) -> Process {
 		min_time = 0x7fefffffffffffff, 
 		process_id = process_id,
 		threads = make([dynamic]Thread),
-		thread_map = vh_init(),
+		thread_map = vh_init(context.temp_allocator),
 		instants = make([dynamic]Instant),
 	}
 }
