@@ -6,9 +6,10 @@ SpallError :: enum int {
 	Bug = 2,
 	InvalidFile = 3,
 	InvalidFileVersion = 4,
+	FileFailure = 5,
 }
 
-EventType :: enum u8 {
+EventType :: enum {
 	Unknown = 0,
 	Instant,
 	Complete,
@@ -17,7 +18,7 @@ EventType :: enum u8 {
 	Metadata,
 	Sample,
 }
-EventScope :: enum u8 {
+EventScope :: enum {
 	Global,
 	Process,
 	Thread,
@@ -25,10 +26,10 @@ EventScope :: enum u8 {
 TempEvent :: struct {
 	type: EventType,
 	scope: EventScope,
-	name: INStr,
-	args: INStr,
 	duration: f64,
 	timestamp: f64,
 	thread_id: u32,
 	process_id: u32,
+	name: INStr,
+	args: INStr,
 }

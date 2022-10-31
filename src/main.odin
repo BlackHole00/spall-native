@@ -3,6 +3,7 @@ package main
 import "core:fmt"
 import "core:time"
 import "core:os"
+import "core:mem"
 
 import glm "core:math/linalg/glsl"
 
@@ -36,6 +37,7 @@ void main() {
 }
 `
 
+@(cold)
 push_fatal :: proc(err: SpallError) -> ! {
 	fmt.eprintf("Error: %v\n", err)
 	os.exit(1)
@@ -73,57 +75,58 @@ main :: proc() {
 	}
 
 	// parse header
-	chunk := chunk_buffer[:rd_sz]
+	full_chunk := chunk_buffer[:rd_sz]
 
 	header_sz := i64(size_of(spall.Header))
-	if i64(len(chunk)) < header_sz {
+	if i64(len(full_chunk)) < header_sz {
 		push_fatal(SpallError.InvalidFile)
 	}
 
-	magic := (^u64)(raw_data(chunk))^
+	magic := (^u64)(raw_data(full_chunk))^
 	if magic != spall.MAGIC {
 		push_fatal(SpallError.InvalidFile)
 	}
 
-	hdr := cast(^spall.Header)raw_data(chunk)
+	hdr := cast(^spall.Header)raw_data(full_chunk)
 	if hdr.version != 1 {
 		fmt.printf("Your file version (%d) is not supported!\n", hdr.version)
 		push_fatal(SpallError.InvalidFileVersion)
 	}
 	
-	p := init_parser(total_size)
+	p := init_parser()
 	p.pos += header_sz
 
+	temp_ev := TempEvent{}
+
 	// loop over the event data
-	for {
-		p.full_chunk = chunk
-		hot_loop: for {
-			ev, state := get_next_event(&p)
-			#partial switch state {
-			case .PartialRead:
-				p.offset = p.pos
+	for p.pos < total_size {
+		chunk := full_chunk[chunk_pos(&p):]
 
-				_, err := os.seek(trace_fd, p.offset, os.SEEK_SET)
-				if err != 0 {
-					fmt.printf("Failed to seek %s\n", os.args[1])
-					os.exit(1)
-				}
-				rd_sz, err2 := os.read(trace_fd, chunk_buffer)
-				if err2 != 0 {
-					fmt.printf("Failed to read %s\n", os.args[1])
-					os.exit(1)
-				}
+		mem.zero(&temp_ev, size_of(TempEvent))
+		state := get_next_event(&p, chunk, &temp_ev)
+		#partial switch state {
+		case .PartialRead:
+			p.offset = p.pos
 
-				chunk = chunk_buffer[:rd_sz]
-				break hot_loop
-			case .Finished:
-				duration := time.tick_since(start_tick)
-				fmt.printf("runtime: %f ms\n", time.duration_milliseconds(duration))
-				os.exit(0)
+			_, err := os.seek(trace_fd, p.pos, os.SEEK_SET)
+			if err != 0 {
+				push_fatal(SpallError.FileFailure)
 			}
-		}
+			rd_sz, err2 := os.read(trace_fd, chunk_buffer)
+			if err2 != 0 {
+				push_fatal(SpallError.FileFailure)
+			}
 
+			full_chunk = chunk_buffer[:rd_sz]
+			continue
+		case .Failure:
+			push_fatal(SpallError.InvalidFile)
+		}
 	}
+
+	duration := time.tick_since(start_tick)
+	fmt.printf("runtime: %f ms\n", time.duration_milliseconds(duration))
+	os.exit(0)
 
 /*
 	WINDOW_WIDTH  :: 640
