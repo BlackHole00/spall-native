@@ -17,6 +17,9 @@ init_parser :: proc() -> Parser {
 	}
 	return p
 }
+free_parser :: proc(p: ^Parser) {
+	in_free(&p.intern)
+}
 
 setup_pid :: proc(trace: ^Trace, process_id: u32) -> int {
 	p_idx, ok := vh_find(&trace.process_map, process_id)
@@ -44,7 +47,35 @@ setup_tid :: proc(trace: ^Trace, p_idx: int, thread_id: u32) -> int {
 	return t_idx
 }
 
+free_trace_temps :: proc(trace: ^Trace) {
+	for process in &trace.processes {
+		for thread in &process.threads {
+			stack_free(&thread.bande_q)
+		}
+		vh_free(&process.thread_map)
+	}
+	vh_free(&trace.process_map)
+	free_parser(&trace.parser)
+}
+
+free_trace :: proc(trace: ^Trace) {
+	for process in &trace.processes {
+		for thread in &process.threads {
+			free_thread(&thread)
+		}
+		free_process(&process)
+	}
+	delete(trace.processes)
+	delete(trace.string_block)
+}
+
 load_file :: proc(filename: string) -> Trace {
+	trace_fd, err := os.open(filename)
+	if err != 0 {
+		push_fatal(SpallError.InvalidFile)
+	}
+	defer os.close(trace_fd)
+
 	chunk_buffer := make([]u8, 1 * 1024 * 1024)
 	defer delete(chunk_buffer)
 
@@ -59,19 +90,13 @@ load_file :: proc(filename: string) -> Trace {
 		parser = init_parser(),
 	}
 
-	trace_fd, err := os.open(filename)
-	if err != 0 {
-		push_fatal(SpallError.InvalidFile)
-	}
-	defer os.close(trace_fd)
-
 	total_size, err2 := os.file_size(trace_fd)
-	if err != 0 {
+	if err2 != 0 {
 		push_fatal(SpallError.InvalidFile)
 	}
 
 	rd_sz, err3 := os.read(trace_fd, chunk_buffer)
-	if err2 != 0 {
+	if err3 != 0 {
 		push_fatal(SpallError.InvalidFile)
 	}
 
@@ -99,5 +124,6 @@ load_file :: proc(filename: string) -> Trace {
 		push_fatal(SpallError.InvalidFile)
 	}
 
+	free_trace_temps(&trace)
 	return trace
 }

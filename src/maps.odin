@@ -31,12 +31,15 @@ in_init :: proc(allocator := context.allocator) -> INMap {
 	v.resize_threshold = i64(f64(len(v.hashes)) * INMAP_LOAD_FACTOR) 
 	return v
 }
+in_free :: proc(v: ^INMap) {
+	delete(v.entries)
+	delete(v.hashes)
+}
 
 in_hash :: proc (key: string) -> u32 #no_bounds_check {
 	k := transmute([]u8)key
 	return #force_inline hash.murmur32(k)
 }
-
 
 in_reinsert :: proc (v: ^INMap, strings: ^[dynamic]u8, entry: INStr, v_idx: int) {
 	hv := u64(in_hash(in_getstr(strings, entry))) & u64(len(v.hashes) - 1)
@@ -115,6 +118,11 @@ vh_init :: proc(allocator := context.allocator) -> ValHash {
 	}
 	v.resize_threshold = i64(f64(len(v.hashes)) * VH_LOAD_FACTOR)
 	return v
+}
+
+vh_free :: proc(v: ^ValHash) {
+	delete(v.entries)
+	delete(v.hashes)
 }
 
 // this is a fibhash.. Replace me if I'm dumb

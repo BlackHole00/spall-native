@@ -88,8 +88,7 @@ ChunkNode :: struct #packed {
 Depth :: struct {
 	head: uint,
 	tree: [dynamic]ChunkNode,
-	bs_events: [dynamic]Event,
-	events: []Event,
+	events: [dynamic]Event,
 }
 
 Thread :: struct {
@@ -121,22 +120,32 @@ init_process :: proc(process_id: u32) -> Process {
 	return Process{
 		min_time = 0x7fefffffffffffff, 
 		process_id = process_id,
+		thread_map = vh_init(),
 		threads = make([dynamic]Thread),
-		thread_map = vh_init(context.temp_allocator),
 		instants = make([dynamic]Instant),
 	}
+}
+free_process :: proc(process: ^Process) {
+	delete(process.threads)
+	delete(process.instants)
 }
 
 init_thread :: proc(thread_id: u32) -> Thread {
 	t := Thread{
 		min_time = 0x7fefffffffffffff, 
 		thread_id = thread_id,
-		events = make([dynamic]Event),
 		depths = make([dynamic]Depth),
 		instants = make([dynamic]Instant),
 	}
-	stack_init(&t.bande_q, context.temp_allocator)
+	stack_init(&t.bande_q)
 	return t
+}
+free_thread :: proc(thread: ^Thread) {
+	for depth in thread.depths {
+		delete(depth.events)
+	}
+	delete(thread.depths)
+	delete(thread.instants)
 }
 
 Stack :: struct($T: typeid) {
@@ -146,6 +155,9 @@ Stack :: struct($T: typeid) {
 stack_init :: proc(s: ^$Q/Stack($T), allocator := context.allocator) {
 	s.arr = make([dynamic]T, 16, allocator)
 	s.len = 0
+}
+stack_free :: proc(s: ^$Q/Stack($T)) {
+	delete(s.arr)
 }
 stack_push_back :: proc(s: ^$Q/Stack($T), elem: T) #no_bounds_check {
 	if s.len >= cap(s.arr) {

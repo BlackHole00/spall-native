@@ -5,6 +5,7 @@ import "core:time"
 import "core:os"
 import "core:mem"
 import "core:intrinsics"
+import "core:strings"
 
 import glm "core:math/linalg/glsl"
 
@@ -60,26 +61,12 @@ push_fatal :: proc(err: SpallError) -> ! {
 }
 
 main :: proc() {
-/*
-	if len(os.args) < 2 {
-		fmt.eprintf("Expected: %v <tracename.spall>\n", os.args[0])
-		os.exit(1)
-	}
-
-	start_tick := time.tick_now()
-	trace := load_file(os.args[1])
-
-	duration := time.tick_since(start_tick)
-	fmt.printf("runtime: %f ms, got %d events\n", time.duration_milliseconds(duration), trace.event_count)
-	os.exit(0)
-*/
-
 	window_width: i32 = 640
 	window_height: i32 = 480
 
 	SDL.Init({.VIDEO})
 
-	window := SDL.CreateWindow("spall", SDL.WINDOWPOS_UNDEFINED, SDL.WINDOWPOS_UNDEFINED, window_width, window_height, {.OPENGL, .RESIZABLE, .ALLOW_HIGHDPI})
+	window := SDL.CreateWindow("spall", SDL.WINDOWPOS_CENTERED, SDL.WINDOWPOS_CENTERED, window_width, window_height, {.OPENGL, .RESIZABLE, .ALLOW_HIGHDPI})
 	if window == nil {
 		fmt.eprintln("Failed to create window")
 		return
@@ -162,19 +149,17 @@ main :: proc() {
 	gl.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, rect_idx_buffer)
 	gl.BufferData(gl.ELEMENT_ARRAY_BUFFER, len(indices)*size_of(indices[0]), raw_data(indices), gl.STATIC_DRAW)
 	
-
-	// high precision timer
-	start_tick := time.tick_now()
-
 	width := f32(window_width)
 	height := f32(window_height)
 	gl.Viewport(0, 0, window_width, window_height)
+
+	start_tick := time.tick_now()
 	loop: for {
 		duration := time.tick_since(start_tick)
 		t := f32(time.duration_seconds(duration))
 
 		// event polling
-		event: SDL.Event
+		event: SDL.Event = ---
 		for SDL.PollEvent(&event) {
 			#partial switch event.type {
 			case .KEYDOWN:
@@ -191,6 +176,17 @@ main :: proc() {
 					height = f32(event.window.data2)
 					gl.Viewport(0, 0, event.window.data1, event.window.data2)
 				}
+			case .DROPFILE:
+				filename := strings.clone_from_cstring(event.drop.file)
+				SDL.free(rawptr(event.drop.file))
+
+				start_time := time.tick_now()
+				trace := load_file(filename)
+				duration := time.tick_since(start_time)
+				free_trace(&trace)
+
+				delete(filename)
+				fmt.printf("runtime: %f ms, got %d events\n", time.duration_milliseconds(duration), trace.event_count)
 			}
 		}
 

@@ -83,16 +83,16 @@ bin_push_event :: proc(trace: ^Trace, process_id, thread_id: u32, event: ^Event)
 
 	if int(t.current_depth) >= len(t.depths) {
 		depth := Depth{
-			bs_events = make([dynamic]Event)
+			events = make([dynamic]Event)
 		}
 		append(&t.depths, depth)
 	}
 
 	depth := &t.depths[t.current_depth]
 	t.current_depth += 1
-	append(&depth.bs_events, event^)
+	append(&depth.events, event^)
 
-	return p_idx, t_idx, len(depth.bs_events)-1
+	return p_idx, t_idx, len(depth.events)-1
 }
 
 parse_binary :: proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size, total_size: i64) {
@@ -153,7 +153,7 @@ parse_binary :: proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size
 
 				thread.current_depth -= 1
 				depth := &thread.depths[thread.current_depth]
-				jev := &depth.bs_events[e_idx]
+				jev := &depth.events[e_idx]
 				jev.duration = temp_ev.timestamp - jev.timestamp
 				jev.self_time = jev.duration
 				thread.max_time = max(thread.max_time, jev.timestamp + jev.duration)
