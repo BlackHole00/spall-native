@@ -26,6 +26,8 @@ out vec4 v_rect_pos;
 
 void main() {
 
+	rect_pos *= u_dpr;
+
 	// if line
 	if (uv.y < 0) {
 		float width = uv.x;
@@ -44,11 +46,11 @@ void main() {
 		gl_Position = vec4((xy / u_resolution) * 2.0 - 1.0, 0.0, 1.0);
 		gl_Position.y = -gl_Position.y;
 
-		v_rect_pos = rect_pos;
+		v_rect_pos = rect_pos * u_dpr;
 
 	// if rect
 	} else {
-		vec2 xy = vec2(rect_pos.x * u_dpr, rect_pos.y) + (idx_pos * vec2(rect_pos.z * u_dpr, rect_pos.w * u_dpr));
+		vec2 xy = vec2(rect_pos.x, rect_pos.y) + (idx_pos * vec2(rect_pos.z, rect_pos.w));
 
 		gl_Position = vec4((xy / u_resolution) * 2.0 - 1.0, 0.0, 1.0);
 		gl_Position.y = -gl_Position.y;
@@ -65,6 +67,7 @@ in vec4 v_rect_pos;
 in vec2 v_uv;
 out vec4 out_color;
 
+uniform float u_dpr;
 uniform vec2  u_resolution;
 
 float sdSegment(vec2 p, vec2 a, vec2 b) {
@@ -85,13 +88,13 @@ float sdOrientedBox( in vec2 p, in vec2 a, in vec2 b, float thick) {
 void main() {
 	// if line
 	if (v_uv.y < 0) {
-		float thick = v_uv.x;
+		float width = v_uv.x * u_dpr;
 		vec2 a = v_rect_pos.xy;
 		vec2 b = v_rect_pos.zw;
 
 		vec2 pos = vec2(gl_FragCoord.x, u_resolution.y - gl_FragCoord.y);
 
-		float d = sdOrientedBox(pos, a, b, thick);
+		float d = sdOrientedBox(pos, a, b, width);
 		float alpha = 1.0 - smoothstep(-min(2.0, thick - 0.5), 0.0, d); 
 		out_color = vec4(v_color.rgb, v_color.a * alpha);
 

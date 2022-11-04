@@ -155,8 +155,8 @@ draw_rect_outline :: proc(rects: ^[dynamic]DrawRect, rect: Rect, width: f64, col
 
 colormode: ColorMode
 main :: proc() {
-	window_width: i32 = 1280
-	window_height: i32 = 720
+	orig_window_width: i32 = 1280
+	orig_window_height: i32 = 720
 
 	set_color_mode(false, false)
 
@@ -172,13 +172,11 @@ main :: proc() {
 	SDL.GL_SetAttribute(.MULTISAMPLEBUFFERS, 1)
 	SDL.GL_SetAttribute(.MULTISAMPLESAMPLES, 16)
 
-	window := SDL.CreateWindow("spall", SDL.WINDOWPOS_CENTERED, SDL.WINDOWPOS_CENTERED, window_width, window_height, {.OPENGL, .RESIZABLE, .ALLOW_HIGHDPI})
+	window := SDL.CreateWindow("spall", SDL.WINDOWPOS_CENTERED, SDL.WINDOWPOS_CENTERED, orig_window_width, orig_window_height, {.OPENGL, .RESIZABLE, .ALLOW_HIGHDPI})
 	if window == nil {
 		fmt.eprintln("Failed to create window")
 		return
 	}
-
-	SDL.GetWindowSize(window, &window_width, &window_height)
 
 	gl_context := SDL.GL_CreateContext(window)
 	gl.load_up_to(GL_VERSION_MAJOR, GL_VERSION_MINOR, SDL.gl_set_proc_address)
@@ -186,6 +184,14 @@ main :: proc() {
 	gl.Enable(gl.BLEND)
 	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 	gl.Enable(gl.MULTISAMPLE)
+
+	real_window_width: i32
+	real_window_height: i32
+	SDL.GL_GetDrawableSize(window, &real_window_width, &real_window_height)
+	width := f64(real_window_width)
+	height := f64(real_window_height)
+	scale := f64(real_window_width) / f64(orig_window_width)
+					fmt.printf("%f, %f\n", width, height)
 
 	rect_program, rect_prog_ok := gl.load_shaders_source(rect_vert_src, rect_frag_src)
 	if !rect_prog_ok {
@@ -250,10 +256,6 @@ main :: proc() {
 	gl.BufferData(gl.ELEMENT_ARRAY_BUFFER, len(indices)*size_of(indices[0]), raw_data(indices), gl.STATIC_DRAW)
 	
 	trace: Trace
-	width := f64(window_width)
-	height := f64(window_height)
-	gl.Viewport(0, 0, window_width, window_height)
-
 	rects := make([dynamic]DrawRect)
 
 	start_tick := time.tick_now()
@@ -268,7 +270,18 @@ main :: proc() {
 
 		// event polling
 		event: SDL.Event = ---
-		for SDL.PollEvent(&event) {
+		first := true
+		event_loop: for {
+			if first {
+				SDL.WaitEvent(&event)
+				first = false
+			} else {
+				ret := SDL.PollEvent(&event)
+				if !ret {
+					break event_loop
+				}
+			}
+
 			#partial switch event.type {
 			case .QUIT:
 				break loop
@@ -280,9 +293,8 @@ main :: proc() {
 			case .WINDOWEVENT:
 				#partial switch event.window.event {
 				case .RESIZED:
-					width = f64(event.window.data1)
-					height = f64(event.window.data2)
-					gl.Viewport(0, 0, event.window.data1, event.window.data2)
+					width = f64(event.window.data1) * scale
+					height = f64(event.window.data2) * scale
 				}
 			case .DROPFILE:
 				filename := strings.clone_from_cstring(event.drop.file)
@@ -311,9 +323,10 @@ main :: proc() {
 			f32(bg_color2.z) / 255,
 			f32(bg_color2.w) / 255
 		)
+		gl.Viewport(0, 0, i32(width), i32(height))
 		gl.Clear(gl.COLOR_BUFFER_BIT)
 
-		gl.Uniform1f(rect_uniforms["u_dpr"].location, 1)
+		gl.Uniform1f(rect_uniforms["u_dpr"].location, 2)
 		gl.Uniform2f(rect_uniforms["u_resolution"].location, f32(width), f32(height))
 		gl.BindBuffer(gl.ARRAY_BUFFER, rect_deets_buffer)
 		gl.BindVertexArray(vao);
