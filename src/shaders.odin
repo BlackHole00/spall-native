@@ -13,7 +13,7 @@ rect_vert_src := `#version 330 core
 layout(location=0) in vec2 idx_pos;
 
 // rect_pos {x, y, width, height}
-layout(location=1) in vec4 rect_pos;
+layout(location=1) in vec4 in_rect_pos;
 layout(location=2) in vec4 color;
 layout(location=3) in vec2 uv;
 
@@ -25,12 +25,11 @@ out vec2 v_uv;
 out vec4 v_rect_pos;
 
 void main() {
-
-	rect_pos *= u_dpr;
+	vec4 rect_pos = in_rect_pos * u_dpr;
 
 	// if line
 	if (uv.y < 0) {
-		float width = uv.x;
+		float width = uv.x * u_dpr;
 		vec2 a = rect_pos.xy;
 		vec2 b = rect_pos.zw;
 		vec2 center = mix(a, b, 0.5);
@@ -46,7 +45,7 @@ void main() {
 		gl_Position = vec4((xy / u_resolution) * 2.0 - 1.0, 0.0, 1.0);
 		gl_Position.y = -gl_Position.y;
 
-		v_rect_pos = rect_pos * u_dpr;
+		v_rect_pos = rect_pos;
 
 	// if rect
 	} else {
@@ -95,7 +94,7 @@ void main() {
 		vec2 pos = vec2(gl_FragCoord.x, u_resolution.y - gl_FragCoord.y);
 
 		float d = sdOrientedBox(pos, a, b, width);
-		float alpha = 1.0 - smoothstep(-min(2.0, thick - 0.5), 0.0, d); 
+		float alpha = 1.0 - smoothstep(-min(2.0, width - 0.5), 0.0, d); 
 		out_color = vec4(v_color.rgb, v_color.a * alpha);
 
 	// if rect

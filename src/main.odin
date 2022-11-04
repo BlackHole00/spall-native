@@ -326,7 +326,7 @@ main :: proc() {
 		gl.Viewport(0, 0, i32(width), i32(height))
 		gl.Clear(gl.COLOR_BUFFER_BIT)
 
-		gl.Uniform1f(rect_uniforms["u_dpr"].location, 2)
+		gl.Uniform1f(rect_uniforms["u_dpr"].location, 1)
 		gl.Uniform2f(rect_uniforms["u_resolution"].location, f32(width), f32(height))
 		gl.BindBuffer(gl.ARRAY_BUFFER, rect_deets_buffer)
 		gl.BindVertexArray(vao);
