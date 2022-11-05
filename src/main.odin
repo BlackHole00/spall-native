@@ -452,10 +452,18 @@ main :: proc() {
 		clicked_on_rect = false
 		rect_count = 0
 		bucket_count = 0
-		draw_flamegraphs(&rects, &trace, start_time, end_time, start_x, rect_height, info_pane_y, graph_header_height, graph_header_text_height, top_line_gap, display_width)
+		draw_flamegraphs(&rects, &trace,
+			start_time, end_time, start_x, rect_height, info_pane_y,
+			graph_header_height, graph_header_text_height, top_line_gap, display_width)
 
-		draw_minimap(&rects, &trace, rect_height, mini_graph_width, display_height, mini_start_x, mini_graph_pad, mini_graph_padded_width, graph_header_text_height)
-		draw_topbars(&rects, &trace, width, display_width, graph_header_height, top_line_gap, start_x, toolbar_height, graph_header_text_height, time_bar_height, wide_graph_height, wide_graph_y, mini_graph_padded_width, start_time, end_time, height)
+		draw_minimap(&rects, &trace,
+			rect_height, mini_graph_width, display_height, mini_start_x, 
+			mini_graph_pad, mini_graph_padded_width, graph_header_text_height)
+
+		draw_topbars(&rects, &trace, 
+			width, height, display_width, graph_header_height, top_line_gap, 
+			start_x, toolbar_height, graph_header_text_height, time_bar_height, 
+			wide_graph_height, wide_graph_y, mini_graph_padded_width, start_time, end_time)
 
 		// draw sidelines
 		draw_line(&rects, Vec2{start_x, toolbar_height + time_bar_height}, Vec2{start_x, info_pane_y}, 1, line_color)

@@ -908,7 +908,7 @@ draw_minimap :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, rect_height, mini
 	draw_rect(rects, rect(mini_start_x, disp_rect.pos.y, mini_graph_width + (mini_graph_pad * 2), graph_header_text_height), bg_color)
 }
 
-draw_topbars :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, width, display_width, graph_header_height, top_line_gap, start_x, toolbar_height, graph_header_text_height, time_bar_height, wide_graph_height, wide_graph_y, mini_graph_padded_width, start_time, end_time, height: f64) {
+draw_topbars :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, width, height, display_width, graph_header_height, top_line_gap, start_x, toolbar_height, graph_header_text_height, time_bar_height, wide_graph_height, wide_graph_y, mini_graph_padded_width, start_time, end_time: f64) {
 	// draw back-covers
 	draw_rect(rects, rect(0, toolbar_height, width, time_bar_height + wide_graph_height), bg_color) // top
 	draw_rect(rects, rect(0, toolbar_height, start_x, height), bg_color) // left
