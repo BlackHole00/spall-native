@@ -360,6 +360,7 @@ main :: proc() {
 		mini_graph_width := 15 * em
 		mini_graph_pad := em
 		mini_graph_padded_width := mini_graph_width + (mini_graph_pad * 2)
+		mini_start_x := width - mini_graph_padded_width
 		time_bar_y := toolbar_height
 		time_bar_height := (top_line_gap * 2) + em
 		wide_graph_y := time_bar_y + time_bar_height
@@ -381,9 +382,25 @@ main :: proc() {
 		highlight_end_x   := rescale(end_time,   0, trace.total_max_time - trace.total_min_time, 0, display_width)
 		disp_rect := rect(start_x, start_y, display_width, display_height)
 
+		draw_rect(&rects, rect(0, disp_rect.pos.y, width - mini_graph_padded_width, graph_header_text_height), bg_color) // top
+		draw_rect(&rects, rect(0, toolbar_height, start_x, height), bg_color) // left
+		draw_line(&rects, Vec2{start_x, disp_rect.pos.y + graph_header_text_height}, Vec2{width - mini_graph_padded_width, disp_rect.pos.y + graph_header_text_height}, 1, line_color)
+
+		// Remove top-left and top-right chunk
+		draw_rect(&rects, rect(0, toolbar_height + time_bar_height + wide_graph_height, start_x, graph_header_text_height), bg_color) // top-left
+
+		draw_rect(&rects, rect(width - mini_graph_padded_width, toolbar_height + time_bar_height + wide_graph_height, width, graph_header_text_height), bg_color) // top-right
+
+		draw_rect(&rects, rect(0, toolbar_height, width, time_bar_height + 1), bg_color)
+
+		// draw sidelines
+		draw_line(&rects, Vec2{start_x, toolbar_height + time_bar_height}, Vec2{start_x, info_pane_y}, 1, line_color)
+		draw_line(&rects, Vec2{mini_start_x, toolbar_height + time_bar_height}, Vec2{mini_start_x, info_pane_y}, 1, line_color)
+
 		division: f64
 		draw_tick_start: f64
 		ticks: int
+		// draw global timebar
 		{
 			start_time : f64 = 0
 			end_time   := trace.total_max_time - trace.total_min_time

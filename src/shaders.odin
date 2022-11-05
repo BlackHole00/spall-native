@@ -74,19 +74,19 @@ float sdSegment(vec2 p, vec2 a, vec2 b) {
 	return length(pa - (ba * h));
 }
 
-float sdOrientedBox( in vec2 p, in vec2 a, in vec2 b, float thick) {
-    float l = length(b-a);
-    vec2  d = (b-a)/l;
-    vec2  q = p-(a+b)*0.5;
-          q = mat2(d.x,-d.y,d.y,d.x)*q;
-          q = abs(q)-vec2(l*0.5,thick);
-    return length(max(q,0.0)) + min(max(q.x,q.y),0.0);    
+float sdOrientedBox(in vec2 p, in vec2 a, in vec2 b, float thick) {
+    float l = length(b - a) + 0.5;
+    vec2  d = (b - a) / l;
+    vec2  q = p - (a + b) * 0.5;
+          q = mat2(d.x, -d.y, d.y, d.x) * q;
+          q = abs(q) - vec2(l * 0.5, thick);
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);    
 }
 
 void main() {
 	// if line
 	if (v_uv.y < 0) {
-		float width = v_uv.x * u_dpr;
+		float width = v_uv.x;
 		vec2 a = v_rect_pos.xy;
 		vec2 b = v_rect_pos.zw;
 
