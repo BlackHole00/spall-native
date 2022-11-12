@@ -71,6 +71,7 @@ default_cursor: ^SDL.Cursor
 pointer_cursor: ^SDL.Cursor
 
 // font data
+dpr: f64 = 1
 p_height : f64 = 14
 em : f64 = p_height
 h1_height: f64 = 18
@@ -188,13 +189,6 @@ main :: proc() {
 	SDL.Init({.VIDEO})
 	SDL_TTF.Init()
 
-	lru.init(&lru_text_cache, 1000)
-	lru_text_cache.on_remove = rm_text_cache
-
-	names := []string{ "Montserrat-Regular.ttf", "FiraMono-Regular.ttf", "fontawesome-webfont.ttf" }
-	sizes := []f64{ p_height, h1_height, h2_height }
-	all_fonts = grab_fonts(names, sizes)
-
 	GL_VERSION_MAJOR :: 3
 	GL_VERSION_MINOR :: 3
 	SDL.GL_SetAttribute(.CONTEXT_PROFILE_MASK,  i32(SDL.GLprofile.CORE))
@@ -226,9 +220,16 @@ main :: proc() {
 	real_window_width: i32
 	real_window_height: i32
 	SDL.GL_GetDrawableSize(window, &real_window_width, &real_window_height)
-	dpr := f64(real_window_width) / f64(orig_window_width)
+	dpr = f64(real_window_width) / f64(orig_window_width)
 	width := f64(orig_window_width)
 	height := f64(orig_window_height)
+
+	lru.init(&lru_text_cache, 1000)
+	lru_text_cache.on_remove = rm_text_cache
+
+	names := []string{ "Montserrat-Regular.ttf", "FiraMono-Regular.ttf", "fontawesome-webfont.ttf" }
+	sizes := []f64{ p_height * dpr, h1_height * dpr, h2_height * dpr }
+	all_fonts = grab_fonts(names, sizes)
 
 	rect_program, rect_prog_ok := gl.load_shaders_source(rect_vert_src, rect_frag_src)
 	if !rect_prog_ok {

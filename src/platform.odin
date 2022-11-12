@@ -120,7 +120,7 @@ measure_text :: proc(str: string, scale: FontSize, font_type: FontType) -> f64 {
 	}
 
 	text_blob := get_text_cache(str, scale, font_type)
-	return f64(text_blob.width)
+	return f64(text_blob.width) / dpr
 }
 
 draw_text :: proc(rects: ^[dynamic]DrawRect, str: string, pos: Vec2, scale: FontSize, font_type: FontType, color: BVec4) {
@@ -133,7 +133,7 @@ draw_text :: proc(rects: ^[dynamic]DrawRect, str: string, pos: Vec2, scale: Font
 
 	x_pos := i32(math.round(pos.x))
 	y_pos := i32(math.round(pos.y))
-	append(rects, DrawRect{FVec4{f32(x_pos), f32(y_pos), f32(text_blob.width), f32(text_blob.height)}, color, FVec2{0.0, 0.0}})
+	append(rects, DrawRect{FVec4{f32(x_pos), f32(y_pos), f32(f64(text_blob.width) / dpr), f32(f64(text_blob.height) / dpr)}, color, FVec2{0.0, 0.0}})
 	
 	// flush. RIP
 	gl.BufferData(gl.ARRAY_BUFFER, len(rects)*size_of(rects[0]), raw_data(rects[:]), gl.DYNAMIC_DRAW)
