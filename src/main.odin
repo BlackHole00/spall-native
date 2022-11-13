@@ -245,7 +245,7 @@ main :: proc() {
 	SDL.GL_SetSwapInterval(-1)
 
 	gl.Enable(gl.BLEND)
-	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+	gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
 	gl.Enable(gl.MULTISAMPLE)
 
 	real_window_width: i32

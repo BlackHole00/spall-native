@@ -100,9 +100,13 @@ void main() {
 		float alpha = 1.0 - smoothstep(-min(2.0, width - 0.5), 0.0, d); 
 		out_color = vec4(v_color.rgb, v_color.a * alpha);
 
+		out_color.rgb *= out_color.a;
+
 	// if rect
 	} else if (v_uv.x < 0) {
 		out_color = v_color;
+
+		out_color.rgb *= out_color.a;
 
 	// if textured rect
 	} else {
@@ -111,6 +115,8 @@ void main() {
 		scaled_idx.y *= v_rect_pos.w;
 		vec2 uv_pos = scaled_idx;
 		out_color = vec4(v_color.rgb, v_color.a * texture(font_tex, uv_pos).a);
+		out_color.rgb *= out_color.a;
+
 	}
 }
 `
