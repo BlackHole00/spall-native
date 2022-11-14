@@ -29,6 +29,18 @@ init_parser :: proc() -> Parser {
 free_parser :: proc(p: ^Parser) {
 	in_free(&p.intern)
 }
+get_chunk :: proc(p: ^Parser, fd: os.Handle, chunk_buffer: []u8) -> (int, bool) {
+	_, err := os.seek(fd, p.pos, os.SEEK_SET)
+	if err != 0 {
+		return 0, false
+	}
+	rd_sz, err2 := os.read(fd, chunk_buffer)
+	if err2 != 0 {
+		return 0, false
+	}
+
+	return rd_sz, true
+}
 
 setup_pid :: proc(trace: ^Trace, process_id: u32) -> int {
 	p_idx, ok := vh_find(&trace.process_map, process_id)
@@ -392,12 +404,14 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 
 		file_type = .SpallStream
 	} else {
-		push_fatal(SpallError.InvalidFile)
+		file_type = .Json
 	}
 
 	#partial switch file_type {
 	case .SpallStream:
-		parse_binary(trace, trace_fd, chunk_buffer, i64(rd_sz), total_size)
+		parse_binary(trace, trace_fd, chunk_buffer, i64(rd_sz))
+	case .Json:
+		parse_json(trace, trace_fd, chunk_buffer)
 	}
 	free_trace_temps(trace)
 
@@ -407,6 +421,8 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 			slice.sort_by(process.threads[:], tid_sort_proc)
 		}
 		slice.sort_by(trace.processes[:], pid_sort_proc)
+	case .Json:
+		json_process_events(trace)
 	}
 
 	duration := time.tick_since(start_time)
@@ -418,4 +434,8 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 	chunk_events(trace)
 	duration = time.tick_since(start_time)
 	fmt.printf("generate spatial partitions -- %f ms\n", time.duration_milliseconds(duration))
+
+	if file_type == .Json {
+		json_generate_selftimes(trace)
+	}
 }

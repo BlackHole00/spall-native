@@ -128,16 +128,16 @@ TempEvent :: struct {
 	name: INStr,
 	args: INStr,
 }
+Instant :: struct #packed {
+	name: INStr,
+	timestamp: f64,
+}
 Event :: struct #packed {
 	name: INStr,
 	args: INStr,
 	timestamp: f64,
 	duration: f64,
 	self_time: f64,
-}
-Instant :: struct #packed {
-	name: INStr,
-	timestamp: f64,
 }
 
 Trace :: struct {
@@ -152,10 +152,12 @@ Trace :: struct {
 	process_map: ValHash,
 	selected_ranges: [dynamic]Range,
 	stats: map[string]Stats,
+	global_instants: [dynamic]Instant,
 
 	total_max_time: f64,
 	total_min_time: f64,
 	event_count: u64,
+	instant_count: u64,
 	stamp_scale: f64,
 }
 
@@ -230,6 +232,7 @@ init_thread :: proc(thread_id: u32) -> Thread {
 	t := Thread{
 		min_time = 0x7fefffffffffffff, 
 		thread_id = thread_id,
+		events = make([dynamic]Event),
 		depths = make([dynamic]Depth),
 		instants = make([dynamic]Instant),
 	}
@@ -241,6 +244,7 @@ free_thread :: proc(thread: ^Thread) {
 		delete(depth.events)
 		delete(depth.tree)
 	}
+	delete(thread.events)
 	delete(thread.depths)
 	delete(thread.instants)
 }

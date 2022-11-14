@@ -100,20 +100,20 @@ bin_push_event :: proc(trace: ^Trace, process_id, thread_id: u32, event: ^Event)
 	return p_idx, t_idx, len(depth.events)-1
 }
 
-parse_binary :: proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size, total_size: i64) {
+parse_binary :: proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size: i64) {
 	temp_ev := TempEvent{}
 	ev := Event{}
 	p := &trace.parser
 
 	last_read: i64 = 0
 	full_chunk := chunk_buffer[:read_size]
-	load_loop: for p.pos < total_size {
+	load_loop: for p.pos < trace.total_size {
 		mem.zero(&temp_ev, size_of(TempEvent))
 		state := get_next_event(trace, full_chunk, &temp_ev)
 		#partial switch state {
 		case .PartialRead:
 			if p.pos == last_read {
-				fmt.printf("Invalid trailing data? dropping from [%d -> %d] (%d bytes)\n", p.pos, total_size, total_size - p.pos)
+				fmt.printf("Invalid trailing data? dropping from [%d -> %d] (%d bytes)\n", p.pos, trace.total_size, trace.total_size - p.pos)
 				break load_loop
 			} else {
 				last_read = p.pos
@@ -121,12 +121,8 @@ parse_binary :: proc(trace: ^Trace, fd: os.Handle, chunk_buffer: []u8, read_size
 
 			p.offset = p.pos
 
-			_, err := os.seek(fd, p.pos, os.SEEK_SET)
-			if err != 0 {
-				push_fatal(SpallError.FileFailure)
-			}
-			rd_sz, err2 := os.read(fd, chunk_buffer)
-			if err2 != 0 {
+			rd_sz, ok := get_chunk(p, fd, chunk_buffer)
+			if !ok {
 				push_fatal(SpallError.FileFailure)
 			}
 
