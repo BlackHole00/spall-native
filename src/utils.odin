@@ -7,6 +7,7 @@ import "core:math"
 import "core:fmt"
 import "core:c"
 import "core:strings"
+import "core:strconv"
 
 trap :: proc() -> ! {
 	intrinsics.trap()
@@ -119,47 +120,63 @@ stat_fmt :: proc(time: f64) -> string {
 	}
 }
 
+my_write_float :: proc(b: ^strings.Builder, f: f64, fmt: byte, prec, bit_size: int) -> (n: int) {
+	buf: [384]byte
+	s := strconv.append_float(buf[1:], f, fmt, prec, bit_size)
+	if s[0] == '+' {
+		s = s[1:]
+	}
+	return strings.write_string(b, s)
+}
+
 time_fmt :: proc(time: f64) -> string {
-	minutes_str: string
-	seconds_str: string
-	millis_str : string
-	micros_str : string
-	nanos_str  : string
-	picos_str  : string
+	b := strings.builder_make(context.temp_allocator)
 
 	mins := math.floor(math.mod(time / ONE_MINUTE, 60))
 	if mins > 0 && mins < 60 {
-		minutes_str = fmt.tprintf(" %.0fm", mins)
+		strings.write_byte(&b, ' ')
+		my_write_float(&b, mins, 'f', 0, 8*size_of(mins))
+		strings.write_byte(&b, 'm')
 	} 
 
 	secs := math.floor(math.mod(time / ONE_SECOND, 60))
 	if secs > 0 && secs < 60 {
-		seconds_str = fmt.tprintf(" %.0fs", secs)
+		strings.write_byte(&b, ' ')
+		my_write_float(&b, secs, 'f', 0, 8*size_of(secs))
+		strings.write_byte(&b, 's')
 	} 
 
 	millis := math.floor(math.mod(time / ONE_MILLI, 1000))
 	if millis > 0 && millis < 1000 {
-		millis_str = fmt.tprintf(" %.0fms", millis)
+		strings.write_byte(&b, ' ')
+		my_write_float(&b, millis, 'f', 0, 8*size_of(millis))
+		strings.write_string(&b, "ms")
 	} 
 
 	micros := math.floor(math.mod(time, 1000))
 	if micros > 0 && micros < 1000 {
-		micros_str = fmt.tprintf(" %.0fμs", micros)
+		strings.write_byte(&b, ' ')
+		my_write_float(&b, micros, 'f', 0, 8*size_of(micros))
+		strings.write_string(&b, "μs")
 	}
 
 	_, nanos := math.modf(time)
 	nanos = math.floor(nanos * 1000)
 	if (nanos > 0 && nanos < 1000) || time == 0 {
-		nanos_str = fmt.tprintf(" %.0fns", nanos)
+		strings.write_byte(&b, ' ')
+		my_write_float(&b, nanos, 'f', 0, 8*size_of(nanos))
+		strings.write_string(&b, "ns")
 	}
 
 	_, picos := math.modf(time)
 	picos = math.floor(picos * 1000000)
 	if (picos > 0 && picos < 1000) {
-		picos_str = fmt.tprintf(" %.0fps", picos)
+		strings.write_byte(&b, ' ')
+		my_write_float(&b, picos, 'f', 0, 8*size_of(picos))
+		strings.write_string(&b, "ps")
 	}
 
-	return fmt.tprintf("%s%s%s%s%s%s", minutes_str, seconds_str, millis_str, micros_str, nanos_str, picos_str)
+	return strings.to_string(b)
 }
 
 TimeClump :: struct {

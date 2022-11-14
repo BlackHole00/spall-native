@@ -425,18 +425,17 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 	case .Json:
 		json_process_events(trace)
 	}
-
-	duration := time.tick_since(start_time)
-	fmt.printf("parse config -- %f ms\n", time.duration_milliseconds(duration))
+	fmt.printf("parse config -- %f ms\n", time.duration_milliseconds(time.tick_since(start_time)))
 	
 	generate_color_choices(trace)
 
 	start_time = time.tick_now()
 	chunk_events(trace)
-	duration = time.tick_since(start_time)
-	fmt.printf("generate spatial partitions -- %f ms\n", time.duration_milliseconds(duration))
+	fmt.printf("generate spatial partitions -- %f ms\n", time.duration_milliseconds(time.tick_since(start_time)))
 
+	start_time = time.tick_now()
 	if file_type == .Json {
 		json_generate_selftimes(trace)
 	}
+	fmt.printf("generate selftimes -- %f ms\n", time.duration_milliseconds(time.tick_since(start_time)))
 }
