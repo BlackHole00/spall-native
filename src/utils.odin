@@ -121,12 +121,7 @@ stat_fmt :: proc(time: f64) -> string {
 }
 
 my_write_float :: proc(b: ^strings.Builder, f: f64, prec: int) -> (n: int) {
-	buf: [384]byte
-	s := strconv.append_float(buf[1:], f, 'f', prec, 8*size_of(f))
-	if s[0] == '+' {
-		s = s[1:]
-	}
-	return strings.write_string(b, s)
+	return strings.write_float(b, f, 'f', prec, 8*size_of(f))
 }
 
 time_fmt :: proc(time: f64) -> string {
