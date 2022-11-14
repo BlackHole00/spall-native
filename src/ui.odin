@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:math"
 import "core:runtime"
 import "core:slice"
+import "core:strings"
 
 next_line :: proc(y: ^f64, h: f64) -> f64 {
 	res := y^
@@ -86,22 +87,34 @@ draw_graph :: proc(rects: ^[dynamic]DrawRect, header: string, history: ^queue.Qu
 	draw_line(rects, Vec2{pos.x - 5, graph_top + graph_edge_pad}, Vec2{pos.x + 5, graph_top + graph_edge_pad}, 1, graph_color)
 
 	if queue.len(history^) > 1 {
+		buf: [384]byte
+		b := strings.builder_from_bytes(buf[:])
+
 		high_height := graph_top + graph_edge_pad - (em / 2)
 		low_height := graph_top + graph_size - graph_edge_pad - (em / 2)
 		avg_height := rescale(f64(avg_val), f64(min_val), f64(max_val), low_height, high_height)
 
-		high_str := fmt.tprintf("%f", max_val)
+		strings.builder_reset(&b)
+		my_write_float(&b, max_val, 3)
+		high_str := strings.to_string(b)
 		high_width := measure_text(high_str, .PSize, .DefaultFont) + line_gap
 		draw_text(rects, high_str, Vec2{(pos.x - 5) - high_width, high_height}, .PSize, .DefaultFont, text_color)
 
 		if queue.len(history^) > 90 {
 			draw_line(rects, Vec2{pos.x - 5, avg_height + (em / 2)}, Vec2{pos.x + 5, avg_height + (em / 2)}, 1, graph_color)
-			avg_str := fmt.tprintf("%f", avg_val)
+
+			strings.builder_reset(&b)
+			my_write_float(&b, avg_val, 3)
+			avg_str := strings.to_string(b)
+
 			avg_width := measure_text(avg_str, .PSize, .DefaultFont) + line_gap
 			draw_text(rects, avg_str, Vec2{(pos.x - 5) - avg_width, avg_height}, .PSize, .DefaultFont, text_color)
 		}
 
-		low_str := fmt.tprintf("%f", min_val)
+		strings.builder_reset(&b)
+		my_write_float(&b, min_val, 3)
+		low_str := strings.to_string(b)
+
 		low_width := measure_text(low_str, .PSize, .DefaultFont) + line_gap
 		draw_text(rects, low_str, Vec2{(pos.x - 5) - low_width, low_height}, .PSize, .DefaultFont, text_color)
 	}
@@ -298,7 +311,7 @@ draw_rect_tooltip :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, dpr: f64) {
 	if ev.self_time != 0 && ev.self_time != duration {
 		rect_tooltip_stats = fmt.tprintf("%s (self %s)", tooltip_fmt(duration), tooltip_fmt(ev.self_time))
 	} else {
-		rect_tooltip_stats = fmt.tprintf("%s", tooltip_fmt(duration))
+		rect_tooltip_stats = tooltip_fmt(duration)
 	}
 
 	text_height := get_text_height(.PSize, .DefaultFont)
@@ -1025,7 +1038,7 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_pane_y, info_p
 
 		thread := trace.processes[p_idx].threads[t_idx]
 		event := thread.depths[d_idx].events[e_idx]
-		draw_text(rects, fmt.tprintf("%s", in_getstr(&trace.string_block, event.name)), Vec2{x_subpad, next_line(&y, em)}, .PSize, .MonoFont, text_color)
+		draw_text(rects, in_getstr(&trace.string_block, event.name), Vec2{x_subpad, next_line(&y, em)}, .PSize, .MonoFont, text_color)
 		if event.args.len > 0 {
 			draw_text(rects, fmt.tprintf(" user data: %s", in_getstr(&trace.string_block, event.args)), Vec2{x_subpad, next_line(&y, em)}, .PSize, .MonoFont, text_color)
 		}
