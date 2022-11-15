@@ -810,6 +810,7 @@ parse_json :: proc (trace: ^Trace, fd: os.Handle, chunk_buffer: []u8) {
 	jp := init_json_parser()
 
 	// skip until we hit the start of the traceEvents arr
+	last_read: i64 = 0
 	full_chunk := chunk_buffer
 	pre_loop: for p.pos <= i64(trace.total_size) {
 		state := the_skipper(trace, &jp, full_chunk)
@@ -838,6 +839,13 @@ parse_json :: proc (trace: ^Trace, fd: os.Handle, chunk_buffer: []u8) {
 
 		#partial switch state {
 		case .PartialRead:
+			if p.pos == last_read {
+				fmt.printf("Invalid trailing data? dropping from [%d -> %d] (%d bytes)\n", p.pos, trace.total_size, trace.total_size - p.pos)
+				break hot_loop
+			} else {
+				last_read = p.pos
+			}
+
 			p.offset = p.pos
 			rd_sz, ok := get_chunk(p, fd, chunk_buffer)
 			if !ok {
