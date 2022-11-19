@@ -159,7 +159,7 @@ Trace :: struct {
 	processes: [dynamic]Process,
 	process_map: ValHash,
 	selected_ranges: [dynamic]Range,
-	stats: map[string]Stats,
+	stats: StatMap,
 	global_instants: [dynamic]Instant,
 
 	total_max_time: f64,

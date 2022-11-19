@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:hash"
 import "core:runtime"
 import "core:strings"
+import "core:slice"
 
 VH_LOAD_FACTOR :: 0.75
 // u32 -> u32 map
@@ -257,4 +258,105 @@ km_find :: proc (v: ^KeyMap, key: string) -> (FieldType, bool) {
 	}
 
 	return .Invalid, false
+}
+
+// Tracking for Stats
+SMMAP_LOAD_FACTOR :: 0.75
+StatEntry :: struct {
+	key: INStr,
+	val: Stats,
+}
+StatMap :: struct {
+	entries: [dynamic]StatEntry,
+	hashes:  [dynamic]int,
+	resize_threshold: i64,
+}
+sm_init :: proc(allocator := context.allocator) -> StatMap {
+	v := StatMap{}
+	v.entries = make([dynamic]StatEntry, 0, allocator)
+	v.hashes = make([dynamic]int, 32, allocator) // must be a power of two
+	for i in 0..<len(v.hashes) {
+		v.hashes[i] = -1
+	}
+	return v
+}
+sm_hash :: proc (key: INStr) -> u32 #no_bounds_check {
+	return u32(key.start) * 2654435769
+}
+sm_reinsert :: proc (v: ^StatMap, entry: StatEntry, v_idx: int) {
+	hv := sm_hash(entry.key) & u32(len(v.hashes) - 1)
+	for i: u32 = 0; i < u32(len(v.hashes)); i += 1 {
+		idx := (hv + i) & u32(len(v.hashes) - 1)
+
+		e_idx := v.hashes[idx]
+		if e_idx == -1 {
+			v.hashes[idx] = v_idx
+			return
+		}
+	}
+
+	push_fatal(SpallError.Bug)
+}
+
+sm_grow :: proc(v: ^StatMap) {
+	resize(&v.hashes, len(v.hashes) * 2)
+	for i in 0..<len(v.hashes) {
+		v.hashes[i] = -1
+	}
+
+	v.resize_threshold = i64(f64(len(v.hashes)) * SMMAP_LOAD_FACTOR) 
+	for entry, idx in v.entries {
+		sm_reinsert(v, entry, idx)
+	}
+}
+
+sm_get :: proc(v: ^StatMap, key: INStr) -> (^Stats, bool) {
+	hv := sm_hash(key) & u32(len(v.hashes) - 1)
+
+	for i: u32 = 0; i < u32(len(v.hashes)); i += 1 {
+		idx := (hv + i) & u32(len(v.hashes) - 1)
+
+		e_idx := v.hashes[idx]
+		if e_idx == -1 {
+			return nil, false
+		} else if v.entries[e_idx].key.start == key.start {
+			return &v.entries[e_idx].val, true
+		}
+	}
+
+	push_fatal(SpallError.Bug)
+}
+sm_insert :: proc(v: ^StatMap, key: INStr, val: Stats) -> ^Stats #no_bounds_check {
+	if i64(len(v.entries)) >= v.resize_threshold {
+		sm_grow(v)
+	}
+
+	hv := sm_hash(key) & u32(len(v.hashes) - 1)
+	for i: u32 = 0; i < u32(len(v.hashes)); i += 1 {
+		idx := (hv + i) & u32(len(v.hashes) - 1)
+
+		e_idx := v.hashes[idx]
+		if e_idx == -1 {
+			v.hashes[idx] = len(v.entries)
+
+			append(&v.entries, StatEntry{key, val})
+			return &v.entries[idx].val
+		} else if v.entries[e_idx].key.start == key.start {
+			v.entries[e_idx] = StatEntry{key, val}
+			return &v.entries[e_idx].val
+		}
+	}
+
+	push_fatal(SpallError.Bug)
+}
+sm_sort :: proc(v: ^StatMap, less: proc(i, j: StatEntry) -> bool) {
+	slice.sort_by(v.entries[:], less)
+}
+sm_clear :: proc(v: ^StatMap)  {
+	resize(&v.entries, 0)
+	resize(&v.hashes, 32)
+	for i in 0..<len(v.hashes) {
+		v.hashes[i] = -1
+	}
+	v.resize_threshold = i64(f64(len(v.hashes)) * SMMAP_LOAD_FACTOR) 
 }

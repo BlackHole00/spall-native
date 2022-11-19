@@ -375,7 +375,7 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 	trace^ = Trace{
 		processes = make([dynamic]Process),
 		selected_ranges = make([dynamic]Range),
-		stats = make(map[string]Stats),
+		stats = sm_init(),
 		process_map = vh_init(),
 		total_max_time = 0,
 		total_min_time = 0x7fefffffffffffff,

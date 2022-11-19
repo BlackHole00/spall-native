@@ -190,7 +190,7 @@ draw_toolbar :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, toolbar_height, w
 			info_pane_scroll = 0
 			info_pane_scroll_vel = 0
 
-			clear(&trace.stats)
+			sm_clear(&trace.stats)
 			resize(&trace.selected_ranges, 0)
 
 			for proc_v, p_idx in trace.processes {
@@ -1113,8 +1113,8 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_pane_y, info_p
 		y += header_height + (em / 4)
 
 		displayed_lines := info_line_count - 1
-		if displayed_lines < len(trace.stats) {
-			max_lines := len(trace.stats)
+		if displayed_lines < len(trace.stats.entries) {
+			max_lines := len(trace.stats.entries)
 
 			// goofy hack to get line height
 			tmp := y
@@ -1128,7 +1128,11 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_pane_y, info_p
 
 		stat_idx := 0
 		last_pos := 0.0
-		stat_loop: for name, stat in trace.stats {
+		stat_loop: for i := 0; i < len(trace.stats.entries); i += 1 {
+			entry := trace.stats.entries[i]
+			name := entry.key
+			stat := entry.val
+
 			stat_idx += 1
 			if y < (info_pane_y + (em / 2)) {
 				next_line(&y, em)
@@ -1175,10 +1179,11 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_pane_y, info_p
 			dr := rect(cursor, y_before, (display_width - cursor - column_gap) * stat.total_time / full_time, y_after - y_before)
 			cursor += column_gap / 2
 
-			name_width := measure_text(name, .PSize, .MonoFont)
-			tmp_color := trace.color_choices[name_color_idx(trace, name)]
+			name_str := in_getstr(&trace.string_block, name)
+			name_width := measure_text(name_str, .PSize, .MonoFont)
+			tmp_color := trace.color_choices[name_color_idx(trace, name_str)]
 			draw_rect(rects, dr, BVec4{u8(tmp_color.x), u8(tmp_color.y), u8(tmp_color.z), 255})
-			draw_text(rects, name, Vec2{cursor, y_before + (em / 3)}, .PSize, .MonoFont, text_color)
+			draw_text(rects, name_str, Vec2{cursor, y_before + (em / 3)}, .PSize, .MonoFont, text_color)
 
 			next_line(&y, em)
 		}
@@ -1352,7 +1357,7 @@ process_multiselect :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pan_delta:
 		// push it into screen-space
 		flopped_rect.pos.x -= disp_rect.pos.x
 
-		clear(&trace.stats)
+		sm_clear(&trace.stats)
 		resize(&trace.selected_ranges, 0)
 
 		// build out ranges
@@ -1474,10 +1479,9 @@ process_multiselect :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pan_delta:
 				duration := bound_duration(ev, thread.max_time)
 
 				name := in_getstr(&trace.string_block, ev.name)
-				s, ok := &trace.stats[name]
+				s, ok := sm_get(&trace.stats, ev.name)
 				if !ok {
-					trace.stats[name] = Stats{min_time = 1e308}
-					s = &trace.stats[name]
+					s = sm_insert(&trace.stats, ev.name, Stats{min_time = 1e308})
 				}
 				s.count += 1
 				s.total_time += duration
@@ -1491,29 +1495,15 @@ process_multiselect :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pan_delta:
 		}
 
 		if !broke_early {
-			for _, stat in &trace.stats {
+			for i := 0; i < len(trace.stats.entries); i += 1 {
+				stat := &trace.stats.entries[i].val
 				stat.avg_time = stat.total_time / f64(stat.count)
 			}
 
-			sort_map_entries_by_time :: proc(m: ^$M/map[$K]$V, loc := #caller_location) {
-				Entry :: struct {
-					hash:  uintptr,
-					next:  int,
-					key:   K,
-					value: V,
-				}
-
-				map_sort :: proc(a: Entry, b: Entry) -> bool {
-					return a.value.self_time > b.value.self_time
-				}
-
-				header := runtime.__get_map_header(m)
-				entries := (^[dynamic]Entry)(&header.m.entries)
-				slice.sort_by(entries[:], map_sort)
-				runtime.__dynamic_map_reset_entries(header, loc)
+			self_sort :: proc(a, b: StatEntry) -> bool {
+				return a.val.self_time > b.val.self_time
 			}
-
-			sort_map_entries_by_time(&trace.stats)
+			sm_sort(&trace.stats, self_sort)
 			stats_state = .Finished
 		}
 	}
@@ -1522,65 +1512,50 @@ process_multiselect :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pan_delta:
 }
 
 sort_stats :: proc(trace: ^Trace) {
-	sort_map_entries_by_time :: proc(m: ^$M/map[$K]$V, loc := #caller_location) {
-		Entry :: struct {
-			hash:  uintptr,
-			next:  int,
-			key:   K,
-			value: V,
-		}
-
-		header := runtime.__get_map_header(m)
-		entries := (^[dynamic]Entry)(&header.m.entries)
-
-		less: proc(a, b: Entry) -> bool
-		switch stat_sort_type {
-		case .SelfTime:
-			less = proc(a, b: Entry) -> bool {
-				if stat_sort_descending {
-					return a.value.self_time > b.value.self_time
-				} else {
-					return a.value.self_time < b.value.self_time
-				}
-			}
-		case .TotalTime:
-			less = proc(a, b: Entry) -> bool {
-				if stat_sort_descending {
-					return a.value.total_time > b.value.total_time
-				} else {
-					return a.value.total_time < b.value.total_time
-				}
-			}
-		case .MinTime:
-			less = proc(a, b: Entry) -> bool {
-				if stat_sort_descending {
-					return a.value.min_time > b.value.min_time
-				} else {
-					return a.value.min_time < b.value.min_time
-				}
-			}
-		case .AvgTime:
-			less = proc(a, b: Entry) -> bool {
-				if stat_sort_descending {
-					return a.value.avg_time > b.value.avg_time
-				} else {
-					return a.value.avg_time < b.value.avg_time
-				}
-			}
-		case .MaxTime:
-			less = proc(a, b: Entry) -> bool {
-				if stat_sort_descending {
-					return a.value.max_time > b.value.max_time
-				} else {
-					return a.value.max_time < b.value.max_time
-				}
+	less: proc(a, b: StatEntry) -> bool
+	switch stat_sort_type {
+	case .SelfTime:
+		less = proc(a, b: StatEntry) -> bool {
+			if stat_sort_descending {
+				return a.val.self_time > b.val.self_time
+			} else {
+				return a.val.self_time < b.val.self_time
 			}
 		}
-		slice.sort_by(entries[:], less)
-
-		runtime.__dynamic_map_reset_entries(header, loc)
+	case .TotalTime:
+		less = proc(a, b: StatEntry) -> bool {
+			if stat_sort_descending {
+				return a.val.total_time > b.val.total_time
+			} else {
+				return a.val.total_time < b.val.total_time
+			}
+		}
+	case .MinTime:
+		less = proc(a, b: StatEntry) -> bool {
+			if stat_sort_descending {
+				return a.val.min_time > b.val.min_time
+			} else {
+				return a.val.min_time < b.val.min_time
+			}
+		}
+	case .AvgTime:
+		less = proc(a, b: StatEntry) -> bool {
+			if stat_sort_descending {
+				return a.val.avg_time > b.val.avg_time
+			} else {
+				return a.val.avg_time < b.val.avg_time
+			}
+		}
+	case .MaxTime:
+		less = proc(a, b: StatEntry) -> bool {
+			if stat_sort_descending {
+				return a.val.max_time > b.val.max_time
+			} else {
+				return a.val.max_time < b.val.max_time
+			}
+		}
 	}
-	sort_map_entries_by_time(&trace.stats)
+	sm_sort(&trace.stats, less)
 }
 
 process_inputs :: proc(trace: ^Trace, stat_pane, mini_graph_rect: Rect, dt, display_width, rect_height, start_x: f64) -> (f64, f64, Vec2) {
