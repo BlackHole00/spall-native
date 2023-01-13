@@ -595,11 +595,9 @@ main :: proc() {
 		draw_minimap(&rects, trace, &ui_state)
 		draw_topbars(&rects, trace, start_time, end_time, &ui_state)
 
-		/*
 		// draw sidelines
-		draw_line(&rects, Vec2{start_x, toolbar_height + time_bar_height}, Vec2{start_x, info_pane_y}, 1, line_color)
-		draw_line(&rects, Vec2{mini_start_x, toolbar_height + time_bar_height}, Vec2{mini_start_x, info_pane_y}, 1, line_color)
-		*/
+		draw_line(&rects, Vec2{ui_state.side_pad, header_height + timebar_height},       Vec2{ui_state.side_pad, ui_state.info_pane_rect.y}, 1, line_color)
+		draw_line(&rects, Vec2{ui_state.minimap_rect.x, header_height + timebar_height}, Vec2{ui_state.minimap_rect.x, ui_state.info_pane_rect.y}, 1, line_color)
 
 		just_started, render_one_more := process_multiselect(&rects, trace, pan_delta, dt, &ui_state)
 		draw_stats(&rects, trace, info_line_count, just_started, &ui_state)
