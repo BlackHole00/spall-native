@@ -1505,7 +1505,7 @@ process_multiselect :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pan_delta:
 		x2 := max(selected_rect.x, selected_rect.x + selected_rect.w)
 		flopped_rect.w = x2 - flopped_rect.x
 
-		flopped_rect.h = min(selected_rect.y, selected_rect.y + selected_rect.h)
+		flopped_rect.y = min(selected_rect.y, selected_rect.y + selected_rect.h)
 		y2 := max(selected_rect.y, selected_rect.y + selected_rect.h)
 		flopped_rect.h = y2 - flopped_rect.y
 

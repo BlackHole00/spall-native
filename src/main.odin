@@ -561,8 +561,8 @@ main :: proc() {
 		ui_state.full_flamegraph_rect   = rect(spall_x_pad, topbars_height, flamegraph_width, flamegraph_height)
 
 		ui_state.inner_flamegraph_rect  = ui_state.full_flamegraph_rect
-		ui_state.inner_flamegraph_rect.y += ui_state.flamegraph_header_height
-		ui_state.inner_flamegraph_rect.h -= ui_state.flamegraph_header_height
+		ui_state.inner_flamegraph_rect.y += ui_state.flamegraph_toptext_height
+		ui_state.inner_flamegraph_rect.h -= ui_state.flamegraph_toptext_height
 
 		ui_state.padded_flamegraph_rect = ui_state.inner_flamegraph_rect
 		ui_state.padded_flamegraph_rect.y += em
