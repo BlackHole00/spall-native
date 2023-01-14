@@ -996,7 +996,7 @@ draw_minimap :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIStat
 							}
 						}
 
-						draw_rect(rects, rect(r_x, y, r_w, ui_state.rect_height), BVec4{u8(rect_color.x), u8(rect_color.y), u8(rect_color.z), 255})
+						draw_rect(rects, rect(r_x, y, r_w, mini_rect_height), BVec4{u8(rect_color.x), u8(rect_color.y), u8(rect_color.z), 255})
 						continue
 					}
 
