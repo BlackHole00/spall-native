@@ -22,6 +22,7 @@ import SDL_TTF "vendor:sdl2/ttf"
 
 import "formats:spall"
 
+
 // input state
 is_mouse_down  := false
 was_mouse_down := false
@@ -148,7 +149,17 @@ reset_flamegraph_camera :: proc(trace: ^Trace, ui_state: ^UIState) {
 	cam.target_pan_x = cam.pan.x
 }
 
-grab_fonts :: proc(names: []string, sizes: []f64) -> []^SDL_TTF.Font {
+load_font :: proc(rw: ^SDL.RWops, size: i32) -> (^SDL_TTF.Font, bool) {
+	font := SDL_TTF.OpenFontRW(rw, true, size)
+	if font == nil {
+		return nil, false
+	}
+
+	SDL_TTF.SetFontHinting(font, SDL_TTF.HINTING_NORMAL)
+	return font, true
+}
+
+grab_dynamic_fonts :: proc(names: []string, sizes: []f64) -> []^SDL_TTF.Font {
 	start_cstr := SDL.GetBasePath()
 	path_str := strings.clone_from_cstring(start_cstr)
 	fonts := make([dynamic]^SDL_TTF.Font)
@@ -157,14 +168,31 @@ grab_fonts :: proc(names: []string, sizes: []f64) -> []^SDL_TTF.Font {
 		full_path := strings.concatenate([]string{path_str, filename})
 		full_path_cstring := strings.clone_to_cstring(full_path)
 		
+		rw := SDL.RWFromFile(full_path_cstring, "rb")
 		for size in sizes {
-			font := SDL_TTF.OpenFont(full_path_cstring, i32(size))
-			if font == nil {
+			font, ok := load_font(rw, i32(size))
+			if !ok {
 				fmt.printf("Failed to open %s @ %f\n", full_path_cstring, size)
 				push_fatal(SpallError.Bug)
 			}
+			append(&fonts, font)
+		}
+	}
 
-			SDL_TTF.SetFontHinting(font, SDL_TTF.HINTING_NORMAL)
+	return fonts[:]
+}
+
+grab_static_fonts :: proc(font_buffers: [][]u8, sizes: []f64) -> []^SDL_TTF.Font {
+	fonts := make([dynamic]^SDL_TTF.Font)
+
+	for font_buffer in font_buffers {
+		rw := SDL.RWFromConstMem(raw_data(font_buffer), i32(len(font_buffer)))
+		for size in sizes {
+			font, ok := load_font(rw, i32(size))
+			if !ok {
+				fmt.printf("Failed to open a compiled font @ size: %f?\n", size)
+				push_fatal(SpallError.Bug)
+			}
 			append(&fonts, font)
 		}
 	}
@@ -248,9 +276,20 @@ main :: proc() {
 	lru.init(&lru_text_cache, 1000)
 	lru_text_cache.on_remove = rm_text_cache
 
+	/*
+	// Use dynamic on-disk fonts
 	names := []string{ "Montserrat-Regular.ttf", "FiraMono-Regular.ttf", "fontawesome-webfont.ttf" }
 	sizes := []f64{ p_height * dpr, h1_height * dpr, h2_height * dpr }
-	all_fonts = grab_fonts(names, sizes)
+	all_fonts = grab_dynamic_fonts(names, sizes)
+	*/
+
+	// Load statically packed fonts
+	sans_font := #load("../fonts/Montserrat-Regular.ttf")
+	mono_font := #load("../fonts/FiraMono-Regular.ttf")
+	icon_font := #load("../fonts/fontawesome-webfont.ttf")
+	fonts := [][]u8{ sans_font, mono_font, icon_font }
+	sizes := []f64{ p_height * dpr, h1_height * dpr, h2_height * dpr }
+	all_fonts = grab_static_fonts(fonts, sizes)
 
 	rect_program, rect_prog_ok := gl.load_shaders_source(rect_vert_src, rect_frag_src)
 	if !rect_prog_ok {
