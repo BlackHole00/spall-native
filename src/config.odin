@@ -142,7 +142,7 @@ gen_event_color :: proc(trace: ^Trace, events: []Event, thread_max: f64) -> (FVe
 	color := FVec3{}
 	color_weights := [len(trace.color_choices)]f64{}
 	for ev in events {
-		idx := cheap_name_color_idx(trace, ev.name.start)
+		idx := name_color_idx(trace, ev.name.start)
 
 		duration := f64(bound_duration(ev, thread_max))
 		if duration <= 0 {

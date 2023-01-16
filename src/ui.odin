@@ -697,7 +697,7 @@ draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRe
 							}
 
 							ev_name := in_getstr(&trace.string_block, ev.name)
-							idx := name_color_idx(trace, ev_name)
+							idx := name_color_idx(trace, ev.name.start)
 							rect_color := trace.color_choices[idx]
 							e_idx := int(cur_node.start_idx) + de_id
 
@@ -1022,7 +1022,7 @@ draw_minimap :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIStat
 							r_x    = max(r_x, 0)
 							r_w   := end_x - r_x
 
-							idx := name_color_idx(trace, in_getstr(&trace.string_block, ev.name))
+							idx := name_color_idx(trace, ev.name.start)
 							rect_color := trace.color_choices[idx]
 							e_idx := int(cur_node.start_idx) + de_id
 
@@ -1340,7 +1340,7 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, info_line_count: in
 
 			name_str := in_getstr(&trace.string_block, name)
 			name_width := measure_text(name_str, .PSize, .MonoFont)
-			tmp_color := trace.color_choices[name_color_idx(trace, name_str)]
+			tmp_color := trace.color_choices[name_color_idx(trace, name.start)]
 			draw_rect(rects, dr, BVec4{u8(tmp_color.x), u8(tmp_color.y), u8(tmp_color.z), 255})
 			draw_text(rects, name_str, Vec2{cursor, y_before + (em / 3)}, .PSize, .MonoFont, text_color)
 
