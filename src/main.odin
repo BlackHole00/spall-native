@@ -259,7 +259,7 @@ main :: proc() {
 
 	gl_context := SDL.GL_CreateContext(window)
 	gl.load_up_to(GL_VERSION_MAJOR, GL_VERSION_MINOR, SDL.gl_set_proc_address)
-	SDL.GL_SetSwapInterval(-1)
+	SDL.GL_SetSwapInterval(0)
 
 	gl.Enable(gl.BLEND)
 	gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)

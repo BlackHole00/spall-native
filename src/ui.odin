@@ -635,14 +635,13 @@ draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRe
 						dr  := Rect{r_x, r_y, end_x - r_x, h}
 
 						rect_color := cur_node.avg_color
-
 						grey := greyscale(cur_node.avg_color)
 						should_fade := false
 						if did_multiselect {
 							if found_rid == -1 { should_fade = true } 
 							else {
 								range := trace.selected_ranges[found_rid]	
-								if !range_in_range(cur_node.start_idx, cur_node.end_idx, uint(range.start), uint(range.end)) {
+								if !range_in_range(cur_node.event_start_idx, cur_node.event_start_idx+uint(cur_node.event_arr_len), uint(range.start), uint(range.end)) {
 									should_fade = true
 								}
 							}
@@ -665,8 +664,8 @@ draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRe
 					}
 
 					// we're at a bottom node, draw the whole thing
-					if cur_node.child_count == 0 {
-						scan_arr := depth.events[cur_node.start_idx:cur_node.start_idx+uint(cur_node.arr_len)]
+					if cur_node.tree_child_count == 0 {
+						scan_arr := depth.events[cur_node.event_start_idx:cur_node.event_start_idx+uint(cur_node.event_arr_len)]
 						y := ui_state.rect_height * f64(d_idx)
 						h := ui_state.rect_height
 
@@ -699,7 +698,7 @@ draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRe
 							ev_name := in_getstr(&trace.string_block, ev.name)
 							idx := name_color_idx(trace, ev.name.start)
 							rect_color := trace.color_choices[idx]
-							e_idx := int(cur_node.start_idx) + de_id
+							e_idx := int(cur_node.event_start_idx) + de_id
 
 							grey := greyscale(trace.color_choices[idx])
 
@@ -773,8 +772,8 @@ draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRe
 						continue
 					}
 
-					for i := cur_node.child_count - 1; i >= 0; i -= 1 {
-						tree_stack[stack_len] = cur_node.children[i]; stack_len += 1
+					for i := cur_node.tree_child_count - 1; i >= 0; i -= 1 {
+						tree_stack[stack_len] = cur_node.tree_start_idx + uint(i); stack_len += 1
 					}
 				}
 			}
@@ -866,8 +865,8 @@ draw_global_activity :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, highlight
 				}
 
 				// we're at a bottom node, draw the whole thing
-				if cur_node.child_count == 0 {
-					scan_arr := depth.events[cur_node.start_idx:cur_node.start_idx+uint(cur_node.arr_len)]
+				if cur_node.tree_child_count == 0 {
+					scan_arr := depth.events[cur_node.event_start_idx:cur_node.event_start_idx+uint(cur_node.event_arr_len)]
 					for ev, de_id in &scan_arr {
 						x := ev.timestamp - trace.total_min_time
 						duration := bound_duration(&ev, thread.max_time)
@@ -892,8 +891,8 @@ draw_global_activity :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, highlight
 					continue
 				}
 
-				for i := cur_node.child_count - 1; i >= 0; i -= 1 {
-					tree_stack[stack_len] = cur_node.children[i]; stack_len += 1
+				for i := cur_node.tree_child_count - 1; i >= 0; i -= 1 {
+					tree_stack[stack_len] = cur_node.tree_start_idx + uint(i); stack_len += 1
 				}
 			}
 		}
@@ -981,7 +980,7 @@ draw_minimap :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIStat
 							if found_rid == -1 { should_fade = true } 
 							else {
 								range := trace.selected_ranges[found_rid]	
-								if !range_in_range(cur_node.start_idx, cur_node.end_idx, uint(range.start), uint(range.end)) {
+								if !range_in_range(cur_node.event_start_idx, cur_node.event_start_idx+uint(cur_node.event_arr_len), uint(range.start), uint(range.end)) {
 									should_fade = true
 								}
 							}
@@ -1001,8 +1000,8 @@ draw_minimap :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIStat
 					}
 
 					// we're at a bottom node, draw the whole thing
-					if cur_node.child_count == 0 {
-						scan_arr := depth.events[cur_node.start_idx:cur_node.start_idx+uint(cur_node.arr_len)]
+					if cur_node.tree_child_count == 0 {
+						scan_arr := depth.events[cur_node.event_start_idx:cur_node.event_start_idx+uint(cur_node.event_arr_len)]
 						for ev, de_id in &scan_arr {
 							x := ev.timestamp - trace.total_min_time
 							duration := bound_duration(&ev, thread.max_time)
@@ -1024,7 +1023,7 @@ draw_minimap :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIStat
 
 							idx := name_color_idx(trace, ev.name.start)
 							rect_color := trace.color_choices[idx]
-							e_idx := int(cur_node.start_idx) + de_id
+							e_idx := int(cur_node.event_start_idx) + de_id
 
 							grey := greyscale(trace.color_choices[idx])
 							should_fade := false
@@ -1051,8 +1050,8 @@ draw_minimap :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIStat
 						continue
 					}
 
-					for i := cur_node.child_count - 1; i >= 0; i -= 1 {
-						tree_stack[stack_len] = cur_node.children[i]; stack_len += 1
+					for i := cur_node.tree_child_count - 1; i >= 0; i -= 1 {
+						tree_stack[stack_len] = cur_node.tree_start_idx + uint(i); stack_len += 1
 					}
 				}
 			}

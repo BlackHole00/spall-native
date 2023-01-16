@@ -186,12 +186,12 @@ print_tree :: proc(tree: []ChunkNode, head: uint) {
 		//padding := pad_buf[len(pad_buf) - stack_len:]
 		fmt.printf("%d | %v\n", tree_idx, cur_node)
 
-		if cur_node.child_count == 0 {
+		if cur_node.tree_child_count == 0 {
 			continue
 		}
 
-		for i := (cur_node.child_count - 1); i >= 0; i -= 1 {
-			tree_stack[stack_len] = cur_node.children[i]; stack_len += 1
+		for i := (cur_node.tree_child_count - 1); i >= 0; i -= 1 {
+			tree_stack[stack_len] = cur_node.tree_start_idx + uint(i); stack_len += 1
 		}
 	}
 	fmt.printf("ded!\n")
@@ -230,9 +230,12 @@ chunk_events :: proc(trace: ^Trace) {
 					node := ChunkNode{}
 					node.start_time = start_ev.timestamp - trace.total_min_time
 					node.end_time   = end_ev.timestamp + bound_duration(&end_ev, tm.max_time) - trace.total_min_time
-					node.start_idx  = uint(start_idx)
-					node.end_idx    = uint(end_idx)
-					node.arr_len = i8(len(scan_arr))
+
+					node.event_start_idx = uint(start_idx)
+					node.event_arr_len  = i8(len(scan_arr))
+
+					node.tree_start_idx = 0
+					node.tree_child_count = 0
 
 					avg_color, weight := gen_event_color(trace, scan_arr, tm.max_time)
 					node.avg_color = avg_color
@@ -252,6 +255,7 @@ chunk_events :: proc(trace: ^Trace) {
 						end_idx := start_idx + min(tree_end_idx - start_idx, CHUNK_NARY_WIDTH)
 
 						children := tree[start_idx:end_idx]
+						child_count := end_idx - start_idx
 
 						start_node := children[0]
 						end_node := children[len(children)-1]
@@ -259,18 +263,19 @@ chunk_events :: proc(trace: ^Trace) {
 						node := ChunkNode{}
 						node.start_time = start_node.start_time
 						node.end_time   = end_node.end_time
-						node.start_idx  = start_node.start_idx
-						node.end_idx    = end_node.end_idx
+
+						node.event_start_idx  = start_node.event_start_idx
+						node.event_arr_len    = 0
+
+						node.tree_start_idx   = uint(start_idx)
+						node.tree_child_count = i8(child_count)
 
 						avg_color := FVec3{}
-						for j := 0; j < len(children); j += 1 {
-							node.children[j] = uint(start_idx + j)
-							avg_color += children[j].avg_color * f32(children[j].weight)
-							node.weight += children[j].weight
+						for j := start_idx; j < start_idx + child_count; j += 1 {
+							avg_color += tree[j].avg_color * f32(tree[j].weight)
+							node.weight += tree[j].weight
 						}
-						node.child_count = i8(len(children))
 						node.avg_color = avg_color / f32(node.weight)
-
 						append(tree, node)
 					}
 
@@ -328,8 +333,8 @@ generate_selftimes :: proc(trace: ^Trace) {
 							continue
 						}
 
-						if cur_node.child_count == 0 {
-							scan_arr := depth.events[cur_node.start_idx:cur_node.start_idx+uint(cur_node.arr_len)]
+						if cur_node.tree_child_count == 0 {
+							scan_arr := depth.events[cur_node.event_start_idx:cur_node.event_start_idx+uint(cur_node.event_arr_len)]
 							weight := 0.0
 							scan_loop: for scan_ev in &scan_arr {
 								scan_ev_start_time := scan_ev.timestamp - trace.total_min_time
@@ -348,8 +353,8 @@ generate_selftimes :: proc(trace: ^Trace) {
 							continue
 						}
 
-						for i := cur_node.child_count - 1; i >= 0; i -= 1 {
-							tree_stack[stack_len] = cur_node.children[i]; stack_len += 1
+						for i := cur_node.tree_child_count - 1; i >= 0; i -= 1 {
+							tree_stack[stack_len] = cur_node.tree_start_idx + uint(i); stack_len += 1
 						}
 					}
 

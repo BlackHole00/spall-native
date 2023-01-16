@@ -210,12 +210,11 @@ ChunkNode :: struct #packed {
 	avg_color: FVec3,
 	weight: f64,
 
-	start_idx: uint,
-	end_idx: uint,
-	children: [CHUNK_NARY_WIDTH]uint,
+	tree_start_idx: uint,
+	event_start_idx: uint,
 
-	child_count: i8,
-	arr_len: i8,
+	tree_child_count: i8,
+	event_arr_len: i8,
 }
 Depth :: struct {
 	head: uint,
