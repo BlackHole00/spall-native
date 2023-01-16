@@ -181,7 +181,7 @@ print_tree :: proc(tree: []ChunkNode, head: uint) {
 		stack_len -= 1
 
 		tree_idx := tree_stack[stack_len]
-		cur_node := tree[tree_idx]
+		cur_node := &tree[tree_idx]
 
 		//padding := pad_buf[len(pad_buf) - stack_len:]
 		fmt.printf("%d | %v\n", tree_idx, cur_node)
@@ -254,11 +254,9 @@ chunk_events :: proc(trace: ^Trace) {
 						start_idx := tree_start_idx + (i * CHUNK_NARY_WIDTH)
 						end_idx := start_idx + min(tree_end_idx - start_idx, CHUNK_NARY_WIDTH)
 
-						children := tree[start_idx:end_idx]
 						child_count := end_idx - start_idx
-
-						start_node := children[0]
-						end_node := children[len(children)-1]
+						start_node := tree[start_idx]
+						end_node := tree[start_idx+(child_count - 1)]
 
 						node := ChunkNode{}
 						node.start_time = start_node.start_time
@@ -322,7 +320,7 @@ generate_selftimes :: proc(trace: ^Trace) {
 						stack_len -= 1
 
 						tree_idx := tree_stack[stack_len]
-						cur_node := tree[tree_idx]
+						cur_node := &tree[tree_idx]
 
 						if end_time < cur_node.start_time || start_time > cur_node.end_time {
 							continue

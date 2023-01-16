@@ -604,7 +604,7 @@ draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRe
 					stack_len -= 1
 
 					tree_idx := tree_stack[stack_len]
-					cur_node := tree[tree_idx]
+					cur_node := &tree[tree_idx]
 
 					if cur_node.end_time < f64(start_time) || cur_node.start_time > f64(end_time) {
 						continue
@@ -840,7 +840,7 @@ draw_global_activity :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, highlight
 					push_fatal(SpallError.Bug)
 				}
 
-				cur_node := tree[tree_idx]
+				cur_node := &tree[tree_idx]
 				range := cur_node.end_time - cur_node.start_time
 				range_width := range * wide_scale_x
 
@@ -953,7 +953,7 @@ draw_minimap :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIStat
 					stack_len -= 1
 
 					tree_idx := tree_stack[stack_len]
-					cur_node := tree[tree_idx]
+					cur_node := &tree[tree_idx]
 					range := cur_node.end_time - cur_node.start_time
 					range_width := range * x_scale
 
