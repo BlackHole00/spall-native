@@ -15,9 +15,6 @@ Rect :: struct {
 	w: f64,
 	h: f64,
 }
-rect :: #force_inline proc(x, y, w, h: f64) -> Rect {
-	return Rect{x, y, w, h}
-}
 
 UIState :: struct {
 	width: f64,

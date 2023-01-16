@@ -526,29 +526,29 @@ main :: proc() {
 			pad_size : f64 = 4
 			chunk_size : f64 = 10
 
-			load_box := rect(0, 0, 100, 100)
-			load_box = rect(
+			load_box := Rect{0, 0, 100, 100}
+			load_box = Rect{
 				(width / 2) - (load_box.w / 2) - pad_size, 
 				(height / 2) - (load_box.h / 2) - pad_size, 
 				load_box.w + pad_size, 
 				load_box.h + pad_size,
-			)
+			}
 
 			draw_rect(&rects, load_box, BVec4{30, 30, 30, 255})
 			chunk_count := int(rescale(f64(offset), 0, f64(size), 0, 100))
 
-			chunk := rect(0, 0, chunk_size, chunk_size)
+			chunk := Rect{0, 0, chunk_size, chunk_size}
 			start_x := load_box.x + pad_size
 			start_y := load_box.y + pad_size
 			for i := chunk_count; i >= 0; i -= 1 {
 				cur_x := f64(i %% int(chunk_size))
 				cur_y := f64(i /  int(chunk_size))
-				draw_rect(&rects, rect(
+				draw_rect(&rects, Rect{
 					start_x + (cur_x * chunk_size), 
 					start_y + (cur_y * chunk_size), 
 					chunk_size - pad_size, 
 					chunk_size - pad_size,
-				), loading_block_color)
+				}, loading_block_color)
 			}
 
 			flush_rects(&rects)
@@ -583,14 +583,14 @@ main :: proc() {
 		ui_state.flamegraph_toptext_height = (ui_state.top_line_gap * 2) + em
 		ui_state.flamegraph_header_height  = ui_state.flamegraph_toptext_height + em
 
-		ui_state.header_rect             = rect(0, 0, width, header_height)
-		ui_state.global_timebar_rect     = rect(0, header_height, width, timebar_height)
-		ui_state.global_activity_rect    = rect(spall_x_pad, header_height + timebar_height, flamegraph_width, activity_height)
-		ui_state.local_timebar_rect      = rect(spall_x_pad, header_height + timebar_height + activity_height, flamegraph_width, timebar_height)
-		ui_state.minimap_rect            = rect(width - minigraph_width, topbars_height, minigraph_width, flamegraph_height)
-		ui_state.info_pane_rect          = rect(0, height - info_pane_height, width, info_pane_height)
+		ui_state.header_rect             = Rect{0, 0, width, header_height}
+		ui_state.global_timebar_rect     = Rect{0, header_height, width, timebar_height}
+		ui_state.global_activity_rect    = Rect{spall_x_pad, header_height + timebar_height, flamegraph_width, activity_height}
+		ui_state.local_timebar_rect      = Rect{spall_x_pad, header_height + timebar_height + activity_height, flamegraph_width, timebar_height}
+		ui_state.minimap_rect            = Rect{width - minigraph_width, topbars_height, minigraph_width, flamegraph_height}
+		ui_state.info_pane_rect          = Rect{0, height - info_pane_height, width, info_pane_height}
 
-		ui_state.full_flamegraph_rect    = rect(spall_x_pad, topbars_height, flamegraph_width, flamegraph_height)
+		ui_state.full_flamegraph_rect    = Rect{spall_x_pad, topbars_height, flamegraph_width, flamegraph_height}
 
 		ui_state.inner_flamegraph_rect    = ui_state.full_flamegraph_rect
 		ui_state.inner_flamegraph_rect.y += ui_state.flamegraph_toptext_height
