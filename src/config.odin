@@ -69,7 +69,7 @@ free_trace_temps :: proc(trace: ^Trace) {
 	}
 	vh_free(&trace.process_map)
 	in_free(&trace.intern)
-	delete(trace.addr_map)
+	am_free(&trace.addr_map)
 }
 
 free_trace :: proc(trace: ^Trace) {
@@ -118,12 +118,10 @@ append_event :: proc(events: ^[dynamic]Event, ev: ^Event, loc := #caller_locatio
 		_ = reserve(events, cap, loc)
 	}
 
-	if cap(events)-len(events) > 0 {
-		a := (^runtime.Raw_Dynamic_Array)(events)
-		data := ([^]Event)(a.data)
-		data[a.len] = ev^
-		a.len += 1
-	}
+	a := (^runtime.Raw_Dynamic_Array)(events)
+	data := ([^]Event)(a.data)
+	data[a.len] = ev^
+	a.len += 1
 
 	return
 }
@@ -373,7 +371,7 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 		file_name = file_name,
 		string_block = make([dynamic]u8),
 		intern = in_init(),
-		addr_map = make(map[u64]u32),
+		addr_map = am_init(),
 		parser = Parser{},
 		error_message = "",
 	}

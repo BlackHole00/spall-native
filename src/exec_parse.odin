@@ -119,6 +119,8 @@ load_executable :: proc(trace: ^Trace, file_name: string) -> bool {
 		return false
 	}
 
+	fmt.printf("Loaded %d symbols!\n", len(trace.addr_map.entries))
+
 	return true
 }
 
@@ -182,7 +184,7 @@ load_macho :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 			interned_symbol := in_get(&trace.intern, &trace.string_block, symbol_name)
 
 			symbol_addr := symbol.value + skew_size
-			trace.addr_map[symbol_addr] = interned_symbol
+			am_insert(&trace.addr_map, symbol_addr, interned_symbol)
 		}
 	}
 
@@ -255,7 +257,7 @@ load_elf :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 		interned_symbol := in_get(&trace.intern, &trace.string_block, symbol_name)
 
 		symbol_addr := symbol.value + skew_size
-		trace.addr_map[symbol_addr] = interned_symbol
+		am_insert(&trace.addr_map, symbol_addr, interned_symbol)
 	}
 
 	return true

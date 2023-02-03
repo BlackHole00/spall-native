@@ -44,7 +44,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 		event := (^spall.MicroBegin_Event)(raw_data(data_start))
 
 		timestamp := f64((event.time_and_type << 8) >> 8)
-		name, ok := trace.addr_map[event.address]
+		name, ok := am_find(&trace.addr_map, event.address)
 		if !ok {
 			tmp_buf := [34]byte{}
 			tmp_buf[0] = '0'

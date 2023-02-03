@@ -195,7 +195,7 @@ Trace :: struct {
 	string_block: [dynamic]u8,
 
 	skew_address: u64,
-	addr_map: map[u64]u32,
+	addr_map: AMMap,
 	color_choices: [16]FVec3,
 
 	processes: [dynamic]Process,
