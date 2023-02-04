@@ -6,6 +6,7 @@ import "core:slice"
 import "core:mem"
 import "core:os"
 import "core:strconv"
+import "core:math"
 import "formats:spall"
 
 as_get_next_buffer :: proc(trace: ^Trace, chunk: []u8, buffer_header: ^spall.BufferHeader) -> BinaryState {
@@ -42,6 +43,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 		}
 
 		event := (^spall.MicroBegin_Event)(raw_data(data_start))
+		raw_time := (event.time_and_type << 8) >> 8
 
 		name, ok := am_find(&trace.addr_map, event.address)
 		if !ok {
@@ -52,7 +54,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 			name = in_get(&trace.intern, &trace.string_block, string(tmp_buf[:len(name_str)+2]))
 		}
 
-		timestamp := i64(f64((event.time_and_type << 8) >> 8) * trace.stamp_scale)
+		timestamp := i64(math.ceil(f64(raw_time) * trace.stamp_scale))
 		ev := Event{
 			name = name,
 			duration = -1,
@@ -97,8 +99,9 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 		}
 
 		event := (^spall.MicroEnd_Event)(raw_data(data_start))
+		raw_time := (event.time_and_type << 8) >> 8
 
-		timestamp := i64(f64((event.time_and_type << 8) >> 8) * trace.stamp_scale)
+		timestamp := i64(math.ceil(f64(raw_time) * trace.stamp_scale))
 		if thread.bande_q.len > 0 {
 			jev_idx := stack_pop_back(&thread.bande_q)
 			thread.current_depth -= 1
