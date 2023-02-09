@@ -87,6 +87,7 @@ build_hash := 0
 enable_debug := false
 fps_history: queue.Queue(f64)
 lru_text_cache: lru.Cache(LRU_Key, LRU_Text)
+global_pool := Pool{}
 
 
 fullscreen := false
@@ -233,8 +234,7 @@ main :: proc() {
 	}
 
 	thread_count := max(os.processor_core_count() - 1, 1)
-	pool := Pool{}
-	pool_init(&pool, thread_count)
+	pool_init(&global_pool, thread_count)
 
 	trace := new(Trace)
 	if terminal_mode {
@@ -242,12 +242,12 @@ main :: proc() {
 			return
 		}
 
-		ok := load_config(&pool, trace)
+		ok := load_config(&global_pool, trace)
 		if !ok {
 			return
 		}
 
-		pool_wait(&pool)
+		pool_wait(&global_pool)
 		return
 	}
 
@@ -533,7 +533,7 @@ main :: proc() {
 		gl.BindVertexArray(vao);
 
 		if start_trace != "" && !loading_config {
-			load_config(&pool, trace)
+			load_config(&global_pool, trace)
 		}
 
 		gl.ClearColor(

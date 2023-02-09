@@ -432,9 +432,6 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 	}
 	defer os.close(trace_fd)
 
-	chunk_buffer := make([]u8, 4 * 1024 * 1024)
-	defer delete(chunk_buffer)
-
 	total_size, err2 := os.file_size(trace_fd)
 	if err2 != 0 {
 		post_error(trace, "unable to get file size!")
@@ -447,6 +444,9 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 	trace.total_size = total_size
 	fmt.printf("Loading %s, %f MB\n", trace.base_name, f64(trace.total_size) / 1024 / 1024)
 
+	chunk_buffer := make([]u8, 4 * 1024 * 1024)
+	defer delete(chunk_buffer)
+
 	rd_sz, err3 := os.read(trace_fd, chunk_buffer)
 	if err3 != 0 {
 		post_error(trace, "Unable to read %s!", file_name)
@@ -456,16 +456,20 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 	// parse header
 	full_chunk := chunk_buffer[:rd_sz]
 
-	magic_sz := i64(size_of(u64))
-	if i64(len(full_chunk)) < magic_sz {
+	magic, ok := slice_to_type(full_chunk, u64)
+	if !ok {
 		post_error(trace, "File %s too small to be valid!", file_name)
 		return
 	}
 
 	file_type: FileType
-	magic := (^u64)(raw_data(full_chunk))^
 	if magic == spall.MANUAL_MAGIC {
-		hdr := cast(^spall.Manual_Header)raw_data(full_chunk)
+		hdr, ok := slice_to_type(full_chunk, spall.Manual_Header)
+		if !ok {
+			post_error(trace, "%s is invalid!", file_name)
+			return
+		}
+
 		if hdr.version != 1 {
 			post_error(trace, "Spall version %d for %s is invalid!", hdr.version, file_name)
 			return
@@ -478,7 +482,12 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 
 		file_type = .ManualStream
 	} else if magic == spall.AUTO_MAGIC {
-		hdr := cast(^spall.Auto_Header)raw_data(full_chunk)
+		hdr, ok := slice_to_type(full_chunk, spall.Auto_Header)
+		if !ok {
+			post_error(trace, "%s is invalid!", file_name)
+			return
+		}
+
 		if hdr.version != 1 {
 			post_error(trace, "Spall version %d for %s is invalid!", hdr.version, file_name)
 			return
@@ -492,7 +501,7 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 		trace.skew_address = hdr.known_address
 
 
-		symbol_path := string(full_chunk[size_of(spall.Auto_Header):size_of(spall.Auto_Header)+hdr.program_path_len])
+		symbol_path := string(full_chunk[size_of(spall.Auto_Header):][:hdr.program_path_len])
 
 		p := &trace.parser
 		p.pos += size_of(spall.Auto_Header) + i64(hdr.program_path_len)
