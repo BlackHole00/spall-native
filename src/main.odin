@@ -11,7 +11,6 @@ import "core:runtime"
 import "core:slice"
 import "core:container/queue"
 import "core:container/lru"
-import "core:thread"
 
 import glm "core:math/linalg/glsl"
 
@@ -184,13 +183,13 @@ grab_static_fonts :: proc(font_buffers: [][]u8, sizes: []f64) -> []^SDL_TTF.Font
 	return fonts[:]
 }
 
-ThreadState :: struct {
+ThreadFileLoadState :: struct {
 	filename: string,
 	trace: ^Trace,
 }
 
-threaded_config_load :: proc(data: rawptr) {
-	state := cast(^ThreadState)(data)
+threaded_config_load :: proc(pool: ^Pool, data: rawptr) {
+	state := cast(^ThreadFileLoadState)(data)
 	
 	trace := state.trace
 	filename := state.filename
@@ -205,6 +204,26 @@ threaded_config_load :: proc(data: rawptr) {
 	post_loading = true
 }
 
+load_config :: proc(pool: ^Pool, trace: ^Trace) -> bool {
+	if loading_config {
+		return false
+	}
+
+	free_trace(trace)
+	trace^ = Trace{}
+	loading_config = true
+
+	state := new(ThreadFileLoadState)
+	state^ = ThreadFileLoadState{
+		filename = start_trace,
+		trace = trace,
+	}
+	start_trace = ""
+
+	pool_add_task(pool, Pool_Task{threaded_config_load, state})
+	return true
+}
+
 terminal_mode := false
 main :: proc() {
 
@@ -213,24 +232,22 @@ main :: proc() {
 		start_trace = strings.clone(os.args[1])
 	}
 
+	thread_count := max(os.processor_core_count() - 1, 1)
+	pool := Pool{}
+	pool_init(&pool, thread_count)
+
 	trace := new(Trace)
 	if terminal_mode {
 		if start_trace == "" {
 			return
 		}
 
-		free_trace(trace)
-		trace^ = Trace{}
-		loading_config = true
-
-		state := new(ThreadState)
-		state^ = ThreadState{
-			filename = start_trace,
-			trace = trace,
+		ok := load_config(&pool, trace)
+		if !ok {
+			return
 		}
-		start_trace = ""
-		threaded_config_load(state)
 
+		pool_wait(&pool)
 		return
 	}
 
@@ -516,17 +533,7 @@ main :: proc() {
 		gl.BindVertexArray(vao);
 
 		if start_trace != "" && !loading_config {
-			free_trace(trace)
-			trace^ = Trace{}
-			loading_config = true
-
-			state := new(ThreadState)
-			state^ = ThreadState{
-				filename = start_trace,
-				trace = trace,
-			}
-			start_trace = ""
-			thread.create_and_start_with_data(state, threaded_config_load)
+			load_config(&pool, trace)
 		}
 
 		gl.ClearColor(
