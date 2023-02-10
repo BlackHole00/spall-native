@@ -632,7 +632,7 @@ main :: proc() {
 			reset_flamegraph_camera(trace, &ui_state)
 
 			if trace.file_name != "" {
-				name := fmt.ctprintf("%s - spall", trace.base_name)
+				name := fmt.ctprintf("%s - spall beta 0.1", trace.base_name)
 				SDL.SetWindowTitle(window, name)
 			}
 			post_loading = false
