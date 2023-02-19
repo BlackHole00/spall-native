@@ -9,9 +9,6 @@ import SDL "vendor:sdl2"
 import SDL_TTF "vendor:sdl2/ttf"
 import gl "vendor:OpenGL"
 
-when ODIN_OS == .Darwin {
-	import NS "vendor:darwin/Foundation"
-}
 
 draw_rect :: proc(rects: ^[dynamic]DrawRect, rect: Rect, color: BVec4) {
 	append(rects, DrawRect{FVec4{f32(rect.x), f32(rect.y), f32(rect.w), f32(rect.h)}, color, FVec2{-2, 0.0}})
@@ -186,29 +183,27 @@ flush_rects :: proc(rects: ^[dynamic]DrawRect) {
 	resize(rects, 0)
 }
 
+when ODIN_OS != .Darwin {
 open_file_dialog :: proc() -> (string, bool) {
-	when ODIN_OS == .Darwin {
-		panel := NS.OpenPanel.openPanel()
-		panel->setCanChooseFiles(true)
-		panel->setResolvesAliases(true)
-		panel->setCanChooseDirectories(false)
-		panel->setAllowsMultipleSelection(false)
-
-		if panel->runModal() == .OK {
-			urls := panel->URLs()
-			ret_count := urls->count()
-			if ret_count != 1 {
-				return "", false
-			}
-
-			url := urls->objectAs(0, ^NS.URL)
-			return strings.clone_from_cstring(url->fileSystemRepresentation()), true
-		}
-	}
-
 	return "", false
+}
 }
 
 get_system_color :: proc() -> bool { return false }
 get_session_storage :: proc(key: string) { }
 set_session_storage :: proc(key, val: string) { }
+
+should_sleep :: proc(cam: ^Camera, info_pane_scroll_vel: f64, stats_state: StatState, anim_playing: bool, render_one_more: bool) -> bool {
+	PAN_X_EPSILON :: 0.01
+	PAN_Y_EPSILON :: 1.0
+	SCALE_EPSILON :: 0.01
+	SCROLL_EPSILON :: 0.01
+
+	panning_x := math.abs(cam.pan.x - cam.target_pan_x) > PAN_X_EPSILON
+	panning_y := math.abs(cam.vel.y - 0) > PAN_Y_EPSILON
+	scaling   := math.abs((cam.current_scale - cam.target_scale) / cam.target_scale) > SCALE_EPSILON
+	scrolling := math.abs(info_pane_scroll_vel) > SCROLL_EPSILON
+	running_stats := stats_state != .Finished && stats_state != .NoStats
+
+	return (!render_one_more && !panning_x && !panning_y && !scaling && !scrolling && !running_stats && !anim_playing)
+}

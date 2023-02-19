@@ -102,6 +102,7 @@ last_frame_count: int
 rect_count      : int
 bucket_count    : int
 was_sleeping    : bool
+awake           : bool
 random_seed     : u64
 
 // loading / trace state
@@ -381,6 +382,7 @@ main :: proc() {
 
 	start_tick := time.tick_now()
 	last_tick: time.Tick
+	awake := true
 	main_loop: for {
 		defer {
 			clicked = false
@@ -395,12 +397,17 @@ main :: proc() {
 		rect_tooltip_pos = Vec2{}
 		rendered_rect_tooltip = false
 
+
 		cur_tick := time.tick_now()
 		duration := time.tick_since(start_tick)
 		t = time.duration_milliseconds(duration)
 
 		dt := time.duration_seconds(time.tick_diff(last_tick, cur_tick))
 		last_tick = cur_tick
+		if was_sleeping {
+			dt = max(dt, 0.001)
+			was_sleeping = false
+		}
 
 		if queue.len(fps_history) > 100 { queue.pop_front(&fps_history) }
 		queue.push_back(&fps_history, 1 / dt)
@@ -415,18 +422,19 @@ main :: proc() {
 
 		// event polling
 		event: SDL.Event = ---
-		first := true
 		event_loop: for {
-/*
-			if first {
-				SDL.WaitEvent(&event)
-				first = false
+			if !awake {
+				ret := SDL.WaitEvent(&event)
+				if !ret {
+					break event_loop
+				}
+
+				awake = true
 			} else {
-			}
-*/
-			ret := SDL.PollEvent(&event)
-			if !ret {
-				break event_loop
+				ret := SDL.PollEvent(&event)
+				if !ret {
+					break event_loop
+				}
 			}
 
 			#partial switch event.type {
@@ -687,6 +695,18 @@ main :: proc() {
 
 		// Phew... Ok, time to dump to the screen
 		flush_rects(&rects)
+
+		// save me my battery, plz
+		if should_sleep(&cam, info_pane_scroll_vel, stats_state, anim_playing, render_one_more) {
+			cam.pan.x = cam.target_pan_x
+			cam.vel.y = 0
+			cam.current_scale = cam.target_scale
+			info_pane_scroll_vel = 0
+			was_sleeping = true
+			awake = false
+		} else {
+			was_sleeping = false
+		}
 
 		gl.Finish()
 		SDL.GL_SwapWindow(window)
