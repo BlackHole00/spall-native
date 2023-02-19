@@ -383,6 +383,7 @@ main :: proc() {
 	start_tick := time.tick_now()
 	last_tick: time.Tick
 	awake := true
+	was_sleeping := false
 	main_loop: for {
 		defer {
 			clicked = false
@@ -404,13 +405,15 @@ main :: proc() {
 
 		dt := time.duration_seconds(time.tick_diff(last_tick, cur_tick))
 		last_tick = cur_tick
-		if was_sleeping {
-			dt = max(dt, 0.001)
-			was_sleeping = false
-		}
 
 		if queue.len(fps_history) > 100 { queue.pop_front(&fps_history) }
 		queue.push_back(&fps_history, 1 / dt)
+
+		// prevent dt from going *too* nuts if we've just woken up
+		if was_sleeping {
+			dt = min(0.016, dt)
+			was_sleeping = false
+		}
 
 		// update animation timers
 		greyanim_t = f32((t - multiselect_t) * 5)
@@ -429,6 +432,7 @@ main :: proc() {
 					break event_loop
 				}
 
+				was_sleeping = true
 				awake = true
 			} else {
 				ret := SDL.PollEvent(&event)
@@ -702,10 +706,9 @@ main :: proc() {
 			cam.vel.y = 0
 			cam.current_scale = cam.target_scale
 			info_pane_scroll_vel = 0
-			was_sleeping = true
+
 			awake = false
 		} else {
-			was_sleeping = false
 			awake = true
 		}
 
