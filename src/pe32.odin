@@ -222,6 +222,79 @@ CV_Proc32 :: struct #packed {
 	flags:             u8,
 }
 
+PDB_Debug_Subsection_Type :: enum u32 {
+	Ignore            =    0,
+	Symbols           = 0xF1,
+	Lines             = 0xF2,
+	StringTable       = 0xF3,
+	FileChecksums     = 0xF4,
+	FrameData         = 0xF5,
+	InlineLines       = 0xF6,
+	CrossScopeImports = 0xF7,
+	CrossScopeExports = 0xF8,
+	InlineLinesEx     = 0xF9,
+	FuncMDTokenMap    = 0xFA,
+	TypeMDTokenMap    = 0xFB,
+	MergedAsmInput    = 0xFC,
+	COFFSymbolRva     = 0xFD,
+}
+
+PDB_Debug_Subsection_Header :: struct #packed {
+	type: PDB_Debug_Subsection_Type,
+	length: u32,
+}
+
+PDB_Line :: struct #packed {
+	offset: u32,
+	things: u32,
+}
+
+PDB_Line_Header :: struct #packed {
+	offset:      u32,
+	index:       u16,
+	has_columns: u16,
+	code_size:   u32,
+}
+PDB_Line_File_Block_Header :: struct #packed {
+	file_checksum_offset: u32,
+	line_count: u32,
+	size: u32,
+}
+
+PDB_Inline_Line_Type :: enum u32 {
+	Signature   = 0,
+	SignatureEx = 1,
+}
+PDB_Inline_Line_Header :: struct #packed {
+	type: PDB_Inline_Line_Type,
+}
+PDB_Inline_Line :: struct #packed {
+	type: PDB_Inline_Line_Type,
+	inlinee: u32,
+	file_checksum_offset: u32,
+	line_header: u32,
+}
+PDB_Inline_Line_Ex :: struct #packed {
+	type: PDB_Inline_Line_Type,
+	inlinee: u32,
+	file_checksum_offset: u32,
+	line_header: u32,
+	extra_lines: u32,
+}
+
+PDB_File_Checksum_Header :: struct #packed {
+	filename_offset: u32,
+	checksum_size:    u8,
+	checksum_type:    u8,
+}
+
+Line :: struct {
+	address: u64,
+	file_idx: u32,
+	number: u32,
+	inline: bool,
+}
+
 load_pe32 :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 	pdb_path := ""
 	dos_end_offset := 0x3c
@@ -313,9 +386,11 @@ load_pe32 :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 	skew_size : u64 = 0
 	symbol_found := false
 
+	//lines := make([dynamic]Line)
+
 	mod_offset := size_of(PDB_DBI_Header)
 	last_mod_info := int(dbi_hdr.mod_info_size) + size_of(PDB_DBI_Header)
-	first_pass: for ; mod_offset < last_mod_info; {
+	for ; mod_offset < last_mod_info; {
 		mod_info_hdr := slice_to_type(dbi_stream[mod_offset:], PDB_Module_Info) or_return
 		mod_offset += size_of(PDB_Module_Info)
 
@@ -342,19 +417,18 @@ load_pe32 :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 		defer delete(symbol_stream)
 
 		// skipping over codeview signature
-		sym_offset := 4
-		for ; sym_offset < (int(mod_info_hdr.symbols_size) - 2); {
-			sym_hdr := slice_to_type(symbol_stream[sym_offset:], PDB_Symbol_Header) or_return
+		cur_offset := 4
+		for ; cur_offset < (int(mod_info_hdr.symbols_size) - 2); {
+			sym_hdr := slice_to_type(symbol_stream[cur_offset:], PDB_Symbol_Header) or_return
 			#partial switch sym_hdr.type {
 				case .GlobalProc32: fallthrough
 				case .LocalProc32: {
-					proc_symbol := slice_to_type(symbol_stream[sym_offset:], CV_Proc32) or_return
-					symbol_name := string(cstring(raw_data(symbol_stream[sym_offset+size_of(CV_Proc32):])))
+					proc_symbol := slice_to_type(symbol_stream[cur_offset:], CV_Proc32) or_return
+					symbol_name := string(cstring(raw_data(symbol_stream[cur_offset+size_of(CV_Proc32):])))
 
-					section_offset := proc_symbol.section_idx * size_of(COFF_Section_Header)
-					section_hdr := slice_to_type(section_buffer[section_offset:], COFF_Section_Header) or_return
+					base_addr := base_address_for_section(section_buffer, proc_symbol.section_idx) or_return
 
-					symbol_addr := u64(section_hdr.virtual_addr + proc_symbol.offset)
+					symbol_addr := base_addr + u64(proc_symbol.offset)
 					interned_symbol := in_get(&trace.intern, &trace.string_block, symbol_name)
 					am_insert(&trace.addr_map, symbol_addr, interned_symbol)
 
@@ -365,12 +439,75 @@ load_pe32 :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 				}
 			}
 
-			sym_offset += 2 + int(sym_hdr.length)
+			cur_offset += 2 + int(sym_hdr.length)
+		}
+
+		cur_offset += int(mod_info_hdr.c11_size)
+		cur_end := int(mod_info_hdr.symbols_size) + int(mod_info_hdr.c11_size) + int(mod_info_hdr.c13_size)
+		for ; cur_offset < cur_end; {
+			dbg_hdr := slice_to_type(symbol_stream[cur_offset:], PDB_Debug_Subsection_Header)
+			cur_offset += size_of(PDB_Debug_Subsection_Header)
+			end_offset := cur_offset + int(dbg_hdr.length)
+
+			#partial switch dbg_hdr.type {
+				case .Lines: {
+					lines_hdr := slice_to_type(symbol_stream[cur_offset:], PDB_Line_Header)
+					base_addr := base_address_for_section(section_buffer, lines_hdr.index) or_return
+					line_addr := base_addr + u64(lines_hdr.offset)
+					cur_offset += size_of(PDB_Line_Header)
+
+					for lfb_count := 0; cur_offset < end_offset; lfb_count += 1 {
+						lfb_hdr := slice_to_type(symbol_stream[cur_offset:], PDB_Line_File_Block_Header) or_return
+						lfb_end_offset := cur_offset + int(lfb_hdr.size)
+
+						cur_offset += size_of(PDB_Line_File_Block_Header)
+						for i := 0; i < int(lfb_hdr.line_count); i += 1 {
+							line := slice_to_type(symbol_stream[cur_offset:], PDB_Line) or_return
+							line_num := (line.things << 8) >> 8
+
+							/*
+							append(&lines, Line{
+								file_idx = u32(lfb_hdr.file_checksum_offset),
+								address = line_addr + u64(line.offset),
+								number = line_num,
+								inline = false,
+							})
+							*/
+							cur_offset += size_of(PDB_Line)
+						}
+
+						cur_offset = lfb_end_offset
+					}
+				}
+				case .InlineLines: {
+					inline_lines_hdr := slice_to_type(symbol_stream[cur_offset:], PDB_Inline_Line_Header)
+					#partial switch inline_lines_hdr.type {
+						case .Signature: {
+							inline_lines := slice_to_type(symbol_stream[cur_offset:], PDB_Inline_Line)
+							//fmt.printf("%#v\n", inline_lines)
+						}
+					}
+				}
+			}
+
+			cur_offset = end_offset
 		}
 	}
 
+
+
 	am_skew(&trace.addr_map, skew_size)
 	return true
+}
+
+base_address_for_section :: proc(section_buffer: []u8, idx: u16) -> (u64, bool) {
+	section_offset := idx * size_of(COFF_Section_Header)
+	section_hdr, ok := slice_to_type(section_buffer[section_offset:], COFF_Section_Header)
+	if !ok {
+		return 0, false
+	}
+
+	return u64(section_hdr.virtual_addr), true
 }
 
 linearize_stream :: proc(data: []u8, indices: []u32, block_size: u32, stream_size: u32) -> []u8 {
