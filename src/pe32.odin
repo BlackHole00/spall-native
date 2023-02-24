@@ -38,9 +38,11 @@ PDB_MAGIC := []u8{
 }
 
 DEBUG_TYPE_CODEVIEW :: 2
-DBI_STREAM_IDX :: 3
+INFO_STREAM_IDX :: 1
+DBI_STREAM_IDX  :: 3
 
-PDB_V70 :: 19990903
+PDB_V70  :: 19990903
+PDB_VC70 :: 20000404
 
 
 COFF_Header :: struct #packed {
@@ -159,8 +161,27 @@ PDB_DBI_Header :: struct #packed {
 	pad:                        u32,
 }
 
-PDB_Named_Stream_Map :: struct #packed {
-	length:              u32,
+PDB_Info_Stream_Header :: struct #packed {
+	version:   u32,
+	signature: u32,
+	age:       u32,
+	guid:   [16]u8,
+}
+
+PDB_HashTable_Header :: struct #packed {
+	size: u32,
+	capacity: u32,
+}
+
+PDB_HashTable_Entry :: struct #packed {
+	string_offset: u32,
+	stream_idx: u32,
+}
+
+PDB_Names_Header :: struct #packed {
+	magic: u32,
+	hash_version: u32,
+	size: u32,
 }
 
 PDB_Section_Contrib_Entry :: struct #packed {
@@ -188,13 +209,6 @@ PDB_Module_Info :: struct #packed {
 	reserved2:            u32,
 	source_file_name_idx: u32,
 	file_path_name_idx:   u32,
-}
-
-PDB_Stream_Header :: struct #packed {
-	signature: u32,
-	version:   u32,
-	size:      u32,
-	guid:   [16]u8,
 }
 
 PDB_Symbol_Header :: struct #packed {
@@ -373,9 +387,57 @@ load_pe32 :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 		offset_into_stream_blocks += stream_block_count
 	}
 
-	dbi_offset_stream_offset := stream_block_offsets[DBI_STREAM_IDX]
+	info_stream_offset := stream_block_offsets[INFO_STREAM_IDX]
+	info_stream_size := stream_sizes[INFO_STREAM_IDX]
+	info_stream_offset_stream := stream_blocks[info_stream_offset:]
+	info_stream := linearize_stream(pdb_buffer, info_stream_offset_stream, msf_hdr.block_size, info_stream_size)
+
+	info_offset := 0
+	info_hdr := slice_to_type(info_stream, PDB_Info_Stream_Header) or_return
+	if info_hdr.version != PDB_VC70 {
+		return false
+	}
+	info_offset += size_of(PDB_Info_Stream_Header)
+
+	string_buffer_length := slice_to_type(info_stream[info_offset:], u32) or_return
+	info_offset += size_of(u32)
+	string_buffer := info_stream[info_offset:][:string_buffer_length]
+	info_offset += int(string_buffer_length)
+
+	hash_hdr := slice_to_type(info_stream[info_offset:], PDB_HashTable_Header) or_return
+	info_offset += size_of(PDB_HashTable_Header)
+
+	present_count := slice_to_type(info_stream[info_offset:], u32) or_return
+	info_offset += size_of(u32)
+	info_offset += int(present_count) * size_of(u32)
+
+	deleted_count := slice_to_type(info_stream[info_offset:], u32) or_return
+	info_offset += size_of(u32)
+	info_offset += int(deleted_count) * size_of(u32)
+
+	name_stream_idx := -1
+	for i : uint = 0; i < uint(hash_hdr.size); i += 1 {
+		entry := slice_to_type(info_stream[info_offset:], PDB_HashTable_Entry) or_return
+		name := cstring(raw_data(string_buffer[entry.string_offset:]))
+		if name == "/names" {
+			name_stream_idx = int(entry.stream_idx)
+			break
+		}
+		info_offset += size_of(PDB_HashTable_Entry)
+	}
+	if name_stream_idx == -1 {
+		return false
+	}
+
+	name_stream_offset := stream_block_offsets[name_stream_idx]
+	name_stream_size := stream_sizes[name_stream_idx]
+	name_offset_stream := stream_blocks[name_stream_offset:]
+	name_stream := linearize_stream(pdb_buffer, name_offset_stream, msf_hdr.block_size, name_stream_size)
+	name_stream_strings := name_stream[size_of(PDB_Names_Header):]
+
+	dbi_offset := stream_block_offsets[DBI_STREAM_IDX]
 	dbi_stream_size := stream_sizes[DBI_STREAM_IDX]
-	dbi_offset_stream := stream_blocks[dbi_offset_stream_offset:]
+	dbi_offset_stream := stream_blocks[dbi_offset:]
 	dbi_stream := linearize_stream(pdb_buffer, dbi_offset_stream, msf_hdr.block_size, dbi_stream_size)
 
 	dbi_hdr := slice_to_type(dbi_stream, PDB_DBI_Header) or_return
@@ -386,7 +448,6 @@ load_pe32 :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 	skew_size : u64 = 0
 	symbol_found := false
 
-	//lines := make([dynamic]Line)
 
 	mod_offset := size_of(PDB_DBI_Header)
 	last_mod_info := int(dbi_hdr.mod_info_size) + size_of(PDB_DBI_Header)
@@ -442,8 +503,55 @@ load_pe32 :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 			cur_offset += 2 + int(sym_hdr.length)
 		}
 
-		cur_offset += int(mod_info_hdr.c11_size)
 		cur_end := int(mod_info_hdr.symbols_size) + int(mod_info_hdr.c11_size) + int(mod_info_hdr.c13_size)
+		cur_offset += int(mod_info_hdr.c11_size)
+		cur_start := cur_offset
+
+		checksum_pile: []u8
+		line_count := 0
+		for ; cur_offset < cur_end; {
+			dbg_hdr := slice_to_type(symbol_stream[cur_offset:], PDB_Debug_Subsection_Header)
+			cur_offset += size_of(PDB_Debug_Subsection_Header)
+			end_offset := cur_offset + int(dbg_hdr.length)
+
+			#partial switch dbg_hdr.type {
+				case .Lines: {
+					lines_hdr := slice_to_type(symbol_stream[cur_offset:], PDB_Line_Header)
+					cur_offset += size_of(PDB_Line_Header)
+
+					for lfb_count := 0; cur_offset < end_offset; lfb_count += 1 {
+						lfb_hdr := slice_to_type(symbol_stream[cur_offset:], PDB_Line_File_Block_Header) or_return
+						lfb_end_offset := cur_offset + int(lfb_hdr.size)
+
+						cur_offset += size_of(PDB_Line_File_Block_Header)
+						for i := 0; i < int(lfb_hdr.line_count); i += 1 {
+							line := slice_to_type(symbol_stream[cur_offset:], PDB_Line) or_return
+							line_count += 1
+							cur_offset += size_of(PDB_Line)
+						}
+
+						cur_offset = lfb_end_offset
+					}
+				}
+				case .InlineLines: {
+					inline_lines_hdr := slice_to_type(symbol_stream[cur_offset:], PDB_Inline_Line_Header)
+					#partial switch inline_lines_hdr.type {
+						case .Signature: {
+							inline_lines := slice_to_type(symbol_stream[cur_offset:], PDB_Inline_Line)
+							line_count += 1
+						}
+					}
+				}
+				case .FileChecksums: {
+					checksum_pile = symbol_stream[cur_offset:]
+				}
+			}
+
+			cur_offset = end_offset
+		}
+
+		cur_offset = cur_start
+		//lines := make([dynamic]Line, 0, line_count)
 		for ; cur_offset < cur_end; {
 			dbg_hdr := slice_to_type(symbol_stream[cur_offset:], PDB_Debug_Subsection_Header)
 			cur_offset += size_of(PDB_Debug_Subsection_Header)
@@ -459,15 +567,19 @@ load_pe32 :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 					for lfb_count := 0; cur_offset < end_offset; lfb_count += 1 {
 						lfb_hdr := slice_to_type(symbol_stream[cur_offset:], PDB_Line_File_Block_Header) or_return
 						lfb_end_offset := cur_offset + int(lfb_hdr.size)
+						checksum_offset := lfb_hdr.file_checksum_offset
 
 						cur_offset += size_of(PDB_Line_File_Block_Header)
 						for i := 0; i < int(lfb_hdr.line_count); i += 1 {
 							line := slice_to_type(symbol_stream[cur_offset:], PDB_Line) or_return
 							line_num := (line.things << 8) >> 8
 
+							checksum_hdr := slice_to_type(checksum_pile[checksum_offset:], PDB_File_Checksum_Header) or_return
+							file_name := string(cstring(raw_data(name_stream_strings[checksum_hdr.filename_offset:])))
+
 							/*
 							append(&lines, Line{
-								file_idx = u32(lfb_hdr.file_checksum_offset),
+								file_idx = u32(checksum_offset),
 								address = line_addr + u64(line.offset),
 								number = line_num,
 								inline = false,
@@ -483,8 +595,7 @@ load_pe32 :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 					inline_lines_hdr := slice_to_type(symbol_stream[cur_offset:], PDB_Inline_Line_Header)
 					#partial switch inline_lines_hdr.type {
 						case .Signature: {
-							inline_lines := slice_to_type(symbol_stream[cur_offset:], PDB_Inline_Line)
-							//fmt.printf("%#v\n", inline_lines)
+							inline_line := slice_to_type(symbol_stream[cur_offset:], PDB_Inline_Line)
 						}
 					}
 				}
@@ -510,7 +621,7 @@ base_address_for_section :: proc(section_buffer: []u8, idx: u16) -> (u64, bool) 
 	return u64(section_hdr.virtual_addr), true
 }
 
-linearize_stream :: proc(data: []u8, indices: []u32, block_size: u32, stream_size: u32) -> []u8 {
+linearize_stream :: proc(data: []u8, indices: []u32, block_size: u32, stream_size: u32, loc := #caller_location) -> []u8 {
 	block_count := div_ceil(stream_size, block_size)
 	linear_space := make([]u8, block_count * block_size)
 
