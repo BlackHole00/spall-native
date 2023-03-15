@@ -395,6 +395,7 @@ main :: proc() {
 			mouse_up_now = false
 			released_event = {-1, -1, -1, -1}
 			frame_count += 1
+			free_all(context.temp_allocator)
 		}
 
 		rect_tooltip_rect = EventID{-1, -1, -1, -1}

@@ -649,6 +649,8 @@ load_elf :: proc(trace: ^Trace, binary_blob: []u8) -> bool {
 
 	sym_section := []u8{}
 	str_section := []u8{}
+	line_section := []u8{}
+	linetable_section := []u8{}
 	for i := 0; i < section_header_array_size; i += int(common_hdr.section_entry_size) {
 		section_hdr, sk := parse_section_header(&ctx, section_header_blob[i:])
 		if !sk {
@@ -665,10 +667,14 @@ load_elf :: proc(trace: ^Trace, binary_blob: []u8) -> bool {
 		}
 
 		section_name := string(cstring(raw_data(section_name_blob)))
-		if section_name == ".symtab" {
-			sym_section = binary_blob[section_hdr.offset:section_hdr.offset+section_hdr.size]
-		} else if section_name == ".strtab" {
-			str_section = binary_blob[section_hdr.offset:section_hdr.offset+section_hdr.size]
+		switch section_name {
+			case ".symtab": {
+				sym_section = binary_blob[section_hdr.offset:section_hdr.offset+section_hdr.size]
+			} case ".strtab": {
+				str_section = binary_blob[section_hdr.offset:section_hdr.offset+section_hdr.size]
+			} case ".debug_line": {
+				line_section = binary_blob[section_hdr.offset:section_hdr.offset+section_hdr.size]
+			}
 		}
 	}
 
@@ -697,5 +703,6 @@ load_elf :: proc(trace: ^Trace, binary_blob: []u8) -> bool {
 	}
 
 	am_skew(&trace.addr_map, skew_size)
-	return true
+
+	return load_dwarf(trace, line_section)
 }

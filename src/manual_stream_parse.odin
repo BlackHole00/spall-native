@@ -65,7 +65,7 @@ ms_get_next_event :: proc(trace: ^Trace, chunk: []u8, temp_ev: ^TempEvent) -> Bi
 		p.pos += event_sz + i64(event.size)
 		return .EventRead
 	case:
-		post_error(trace, "Invalid event type: %d in file!", data_start[0])
+		post_error(trace, "Invalid event type: 0x%x in file, offset: 0x%x", data_start[0], p.pos)
 		return .Failure
 	}
 
