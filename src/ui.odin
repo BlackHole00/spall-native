@@ -1214,7 +1214,7 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, just_started: bool,
 	handle_pad := (em / 2)
 	tab_handle_rect := Rect{0, info_pane_rect.y, (2 * handle_pad) + handle_width, tab_select_height}
 	draw_rect(rects, tab_handle_rect, toolbar_button_color)
-	draw_text(rects, handle_text, Vec2{handle_pad, handle_y}, .H2Size, .IconFont, text_color)
+	draw_text(rects, handle_text, Vec2{handle_pad, handle_y}, .H2Size, .IconFont, toolbar_text_color)
 
 	tab_bar_x := (2 * handle_pad) + handle_width
 
