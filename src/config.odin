@@ -441,7 +441,7 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 	fmt.printf("Loading %s, %f MB\n", trace.base_name, f64(trace.total_size) / 1024 / 1024)
 
 	header_buffer := [0x4000]u8{}
-	rd_sz, err3 := os.read(trace_fd, header_buffer[:])
+	rd_sz, err3 := os.read_at(trace_fd, header_buffer[:], 0)
 	if err3 != 0 {
 		post_error(trace, "Unable to read %s!", file_name)
 		return
