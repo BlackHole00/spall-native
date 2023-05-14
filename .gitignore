@@ -2,3 +2,4 @@ bin
 *.spall
 *.swp
 .DS_Store
+*.zip

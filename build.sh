@@ -1,3 +1,4 @@
+rm spall*.zip
 rm -rf bin
 mkdir bin
 
@@ -9,4 +10,9 @@ else
 	odin build src -collection:formats=formats -out:bin/spall -debug -keep-temp-files
 fi
 
-cp resources/* bin/.
+if [ "$1" = "release" ]; then
+	cp resources/* bin/.
+
+	spall_date=$(date +'%m_%d_%Y')
+	zip -r spall_native_$spall_date.zip bin
+fi
