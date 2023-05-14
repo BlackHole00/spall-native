@@ -1538,7 +1538,7 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState)
 		name_header_text   := fmt.tprintf("%-10s", "   name")
 		text_outf(rects, &cursor, y, name_header_text, text_color)
 	} else if info_pane_rect.h > ((ui_state.line_height * 2) + (ui_state.top_line_gap * 2)) {
-		y := info_pane_rect.y + info_pane_rect.h - (ui_state.top_line_gap * 2)
+		y := (info_pane_rect.y + info_pane_rect.h) - (ui_state.top_line_gap * 3)
 
 		draw_text(rects, "Shift-click and drag to get stats for multiple rectangles", Vec2{stats_pane_x, prev_line(&y, em)}, .PSize, .DefaultFont, text_color)
 		draw_text(rects, "Click on a rectangle to inspect", Vec2{stats_pane_x, prev_line(&y, em)}, .PSize, .DefaultFont, text_color)
