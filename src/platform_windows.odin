@@ -10,8 +10,8 @@ platform_init :: proc() {
 }
 
 open_file_dialog :: proc() -> (string, bool) {
-	path_buf, ok := make([]u16, windows.MAX_PATH_WIDE)
-	if !ok {
+	path_buf := make([]u16, windows.MAX_PATH_WIDE)
+	if path_buf == nil {
 		push_fatal(SpallError.OutOfMemory)
 	}
 	defer delete(path_buf)
@@ -43,7 +43,8 @@ open_file_dialog :: proc() -> (string, bool) {
 	}
 
 	file_name, _ := windows.utf16_to_utf8(path_buf[:])
-	path := strings.clone_from_cstring(file_name)
+	trimmed_name := strings.trim_right_null(file_name)
+	path := strings.clone(trimmed_name)
 
 	fmt.printf("path: %s\n", path)
 	return path, true
