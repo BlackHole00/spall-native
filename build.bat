@@ -1,7 +1,6 @@
 @echo off
 rmdir /s /q bin
 md bin
-robocopy /njh /njs /ndl /nc /ns resources/ bin/
 
 if "%1"=="release" (
     odin build src -collection:formats=formats -out:bin\spall.exe -debug -o:speed -no-bounds-check -subsystem:windows -define:GL_DEBUG=false

@@ -10,7 +10,7 @@ platform_init :: proc() {
 }
 
 open_file_dialog :: proc() -> (string, bool) {
-	path_buf := make([]u16, MAX_PATH_WIDE)
+	path_buf := make([]u16, windows.MAX_PATH_WIDE)
 	defer delete(path_buf)
 
 	filters := []string{"All Files", "*.*"}
@@ -23,9 +23,9 @@ open_file_dialog :: proc() -> (string, bool) {
 	default_ext := ""
 
 	ofn := windows.OPENFILENAMEW{
-		lStructSize     = sizeof(windows.OPENFILENAMEW),
-		lpstrFile       = wstring(&path_buf[0]),
-		nMaxFile        = MAX_PATH_WIDE,
+		lStructSize     = size_of(windows.OPENFILENAMEW),
+		lpstrFile       = windows.wstring(&path_buf[0]),
+		nMaxFile        = windows.MAX_PATH_WIDE,
 		lpstrTitle      = windows.utf8_to_wstring(title, context.temp_allocator),
 		lpstrFilter     = windows.utf8_to_wstring(filter, context.temp_allocator),
 		lpstrInitialDir = windows.utf8_to_wstring(dir, context.temp_allocator),
