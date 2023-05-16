@@ -63,7 +63,7 @@ demangle_symbol :: proc(name: string, tmp_buffer: []u8) -> (string, bool) {
 	ret_str := _cxa_demangle(rawptr(name_cstr), raw_data(tmp_buffer), &buffer_size, &status)
 	if status == -2 {
 		return name, true
-	} else {
+	} else if status != 0 {
 		return "", false
 	}
 
