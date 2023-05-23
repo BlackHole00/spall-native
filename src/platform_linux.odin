@@ -55,7 +55,7 @@ foreign abi {
 }
 
 demangle_symbol :: proc(name: string, tmp_buffer: []u8) -> (string, bool) {
-	name_cstr := strings.clone_to_cstring(name_str, context.temp_allocator)
+	name_cstr := strings.clone_to_cstring(name, context.temp_allocator)
 	buffer_size := len(tmp_buffer)
 
 	status : i32 = 0
