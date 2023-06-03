@@ -226,6 +226,11 @@ load_config :: proc(pool: ^Pool, trace: ^Trace) -> bool {
 
 terminal_mode := false
 main :: proc() {
+	val : i64 = -1
+	val_arr := (transmute([8]u8)val)
+	fmt.printf("%v || %v\n", pack_ns(val), val_arr[:6])
+	fmt.printf("%d == %d\n", val, unpack_ns(pack_ns(val)))
+	if true { return }
 
 	// If the user passed us a trace, save off the filename now
 	if len(os.args) == 2 {
@@ -288,7 +293,7 @@ main :: proc() {
 	}
 
 	gl.load_up_to(GL_VERSION_MAJOR, GL_VERSION_MINOR, SDL.gl_set_proc_address)
-	SDL.GL_SetSwapInterval(-1)
+	SDL.GL_SetSwapInterval(0)
 
 	version_str := gl.GetString(gl.VERSION)
 	if version_str == "1.1.0" {
@@ -739,5 +744,6 @@ should_sleep :: proc(cam: ^Camera, ui_state: ^UIState) -> bool {
 	scaling   := math.abs((cam.current_scale - cam.target_scale) / cam.target_scale) > SCALE_EPSILON
 	scrolling := (math.abs(ui_state.filter_pane_scroll_vel) > SCROLL_EPSILON) || (math.abs(ui_state.stats_pane_scroll_vel) > SCROLL_EPSILON)
 
+	if true { return false }
 	return (!ui_state.render_one_more && !panning_x && !panning_y && !scaling && !scrolling)
 }

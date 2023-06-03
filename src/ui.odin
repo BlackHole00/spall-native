@@ -442,7 +442,8 @@ draw_rect_tooltip :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^U
 	duration := bound_duration(&ev, thread.max_time)
 
 	rect_tooltip_name := in_getstr(&trace.string_block, ev.name)
-	if ev.duration == -1 {
+	dur := unpack_ns(ev.duration)
+	if dur == -1 {
 		rect_tooltip_name = fmt.tprintf("%s (Did Not Finish)", in_getstr(&trace.string_block, ev.name))
 	}
 
@@ -659,7 +660,8 @@ draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRe
 						h := ui_state.rect_height
 
 						for ev, de_id in &scan_arr {
-							x := f64(ev.timestamp - trace.total_min_time)
+							ts := unpack_ns(ev.timestamp)
+							x := f64(ts - trace.total_min_time)
 							duration := f64(bound_duration(&ev, thread.max_time))
 							w := max(duration * cam.current_scale, 2.0)
 							xm := x * cam.target_scale
@@ -716,7 +718,8 @@ draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRe
 							disp_w := min(dr.w - underhang, dr.w, overhang)
 
 							display_name := ev_name
-							if ev.duration == -1 {
+							dur := unpack_ns(ev.duration)
+							if dur == -1 {
 								display_name = fmt.tprintf("%s (Did Not Finish)", ev_name)
 							}
 
@@ -850,7 +853,8 @@ draw_global_activity :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, highlight
 				if cur_node.tree_child_count == 0 {
 					scan_arr := depth.events[cur_node.event_start_idx:cur_node.event_start_idx+uint(cur_node.event_arr_len)]
 					for ev, de_id in &scan_arr {
-						x := f64(ev.timestamp - trace.total_min_time)
+						ts := unpack_ns(ev.timestamp)
+						x := f64(ts - trace.total_min_time)
 						duration := f64(bound_duration(&ev, thread.max_time))
 						w := max(duration * wide_scale_x, 2.0)
 						xm := x * wide_scale_x
@@ -978,7 +982,8 @@ draw_minimap :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIStat
 					if cur_node.tree_child_count == 0 {
 						scan_arr := depth.events[cur_node.event_start_idx:cur_node.event_start_idx+uint(cur_node.event_arr_len)]
 						for ev, de_id in &scan_arr {
-							x := f64(ev.timestamp - trace.total_min_time)
+							ts := unpack_ns(ev.timestamp)
+							x := f64(ts - trace.total_min_time)
 							duration := f64(bound_duration(&ev, thread.max_time))
 							w := max(duration * x_scale, 2.0)
 							xm := x * x_scale
@@ -1302,7 +1307,8 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState)
 			args_str := in_getstr(&trace.string_block, event.args)
 			draw_text(rects, fmt.tprintf(" user data: %s", args_str), Vec2{stats_pane_x, next_line(&y, em)}, .PSize, .MonoFont, text_color)
 		}
-		draw_text(rects, fmt.tprintf("start time:%s", time_fmt(f64(event.timestamp - trace.total_min_time))), Vec2{stats_pane_x, next_line(&y, em)}, .PSize, .MonoFont, text_color)
+		ts := unpack_ns(event.timestamp)
+		draw_text(rects, fmt.tprintf("start time:%s", time_fmt(f64(ts - trace.total_min_time))), Vec2{stats_pane_x, next_line(&y, em)}, .PSize, .MonoFont, text_color)
 		draw_text(rects, fmt.tprintf("  duration:%s", time_fmt(f64(bound_duration(&event, thread.max_time)))), Vec2{stats_pane_x, next_line(&y, em)}, .PSize, .MonoFont, text_color)
 		draw_text(rects, fmt.tprintf(" self time:%s", time_fmt(f64(event.self_time))), Vec2{stats_pane_x, next_line(&y, em)}, .PSize, .MonoFont, text_color)
 
@@ -1872,7 +1878,8 @@ build_selected_ranges :: proc(trace: ^Trace, ui_state: ^UIState) {
 				fwd_scan_loop: for i := 0; i < len(scan_arr); i += 1 {
 					ev := scan_arr[i]
 
-					start := f64(ev.timestamp - trace.total_min_time)
+					ts := unpack_ns(ev.timestamp)
+					start := f64(ts - trace.total_min_time)
 					width := f64(bound_duration(&ev, thread.max_time))
 					if !range_in_range(start, start + width, trace.stats_start_time, trace.stats_end_time) {
 						continue fwd_scan_loop
@@ -1886,7 +1893,8 @@ build_selected_ranges :: proc(trace: ^Trace, ui_state: ^UIState) {
 				rev_scan_loop: for i := len(scan_arr) - 1; i >= 0; i -= 1 {
 					ev := scan_arr[i]
 
-					start := f64(ev.timestamp - trace.total_min_time)
+					ts := unpack_ns(ev.timestamp)
+					start := f64(ts - trace.total_min_time)
 					width := f64(bound_duration(&ev, thread.max_time))
 					if !range_in_range(start, start + width, trace.stats_start_time, trace.stats_end_time) {
 						continue rev_scan_loop

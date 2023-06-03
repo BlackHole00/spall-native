@@ -549,8 +549,8 @@ process_sample :: proc(trace: ^Trace, jp: ^JSONParser, ev: ^TempEvent) -> bool {
 				// ugh. thanks Google. GC events are weird.
 				mem.zero(&new_event, size_of(Event))
 				new_event.name = cur_sample_node.name
-				new_event.duration = -1
-				new_event.timestamp = profile.time
+				new_event.duration = pack_ns(-1)
+				new_event.timestamp = pack_ns(profile.time)
 
 				_, _, e_idx := json_push_event(trace, ev.process_id, ev.thread_id, &new_event)
 
@@ -611,8 +611,8 @@ process_sample :: proc(trace: ^Trace, jp: ^JSONParser, ev: ^TempEvent) -> bool {
 
 					mem.zero(&new_event, size_of(Event))
 					new_event.name = node.name
-					new_event.duration = -1
-					new_event.timestamp = profile.time
+					new_event.duration = pack_ns(-1)
+					new_event.timestamp = pack_ns(profile.time)
 
 					_, _, e_idx := json_push_event(trace, ev.process_id, ev.thread_id, &new_event)
 					sample := Sample{node_id = node_id, event_idx = i64(e_idx)}
@@ -633,17 +633,17 @@ process_event :: proc(trace: ^Trace, jp: ^JSONParser, ev: ^TempEvent) -> bool {
 		new_event := Event{
 			name = ev.name,
 			args = ev.args,
-			duration = ev.duration,
+			duration = pack_ns(ev.duration),
 			self_time = ev.duration,
-			timestamp = ev.timestamp,
+			timestamp = pack_ns(ev.timestamp),
 		}
 		json_push_event(trace, u32(ev.process_id), u32(ev.thread_id), &new_event)
 	case .Begin:
 		new_event := Event{
 			name = ev.name,
 			args = ev.args,
-			duration = -1,
-			timestamp = ev.timestamp,
+			duration = pack_ns(-1),
+			timestamp = pack_ns(ev.timestamp),
 		}
 
 		p_idx, t_idx, e_idx := json_push_event(trace, u32(ev.process_id), u32(ev.thread_id), &new_event)
@@ -666,10 +666,15 @@ process_event :: proc(trace: ^Trace, jp: ^JSONParser, ev: ^TempEvent) -> bool {
 		if thread.bande_q.len > 0 {
 			jev_idx := stack_pop_back(&thread.bande_q)
 			jev := &thread.events[jev_idx]
-			jev.duration = ev.timestamp - jev.timestamp
-			jev.self_time = jev.duration
-			thread.max_time = max(thread.max_time, jev.timestamp + jev.duration)
-			trace.total_max_time = max(trace.total_max_time, jev.timestamp + jev.duration)
+
+			ev_ts := ev.timestamp
+			jev_ts := unpack_ns(jev.timestamp)
+			jev_dur := ev_ts - jev_ts
+
+			jev.duration = pack_ns(jev_dur)
+			jev.self_time = jev_dur
+			thread.max_time = max(thread.max_time, jev_ts + jev_dur)
+			trace.total_max_time = max(trace.total_max_time, jev_ts + jev_dur)
 		} else {
 			fmt.printf("You've sent one too many ends!\n")
 		}
@@ -930,11 +935,14 @@ json_parse :: proc (trace: ^Trace, fd: os.Handle) -> bool {
 json_patch_end :: proc(trace: ^Trace, p_idx, t_idx: int, e_idx: i64, end_time: i64) {
 	thread := &trace.processes[p_idx].threads[t_idx]
 	jev := &thread.events[e_idx]
-	jev.duration = end_time - jev.timestamp
-	jev.self_time = jev.duration
 
-	thread.max_time = max(thread.max_time, jev.timestamp + jev.duration)
-	trace.total_max_time = max(trace.total_max_time, jev.timestamp + jev.duration)
+	jev_ts := unpack_ns(jev.timestamp)
+	jev_dur := end_time - jev_ts
+	jev.duration = pack_ns(jev_dur)
+	jev.self_time = jev_dur
+
+	thread.max_time = max(thread.max_time, jev_ts + jev_dur)
+	trace.total_max_time = max(trace.total_max_time, jev_ts + jev_dur)
 }
 
 json_push_instant :: proc(trace: ^Trace, event: ^TempEvent) {
@@ -973,16 +981,18 @@ json_push_event :: proc(trace: ^Trace, process_id, thread_id: u32, event: ^Event
 	t_idx := setup_tid(trace, p_idx, thread_id)
 
 	trace.event_count += 1
+	ts := unpack_ns(event.timestamp)
+	dur := unpack_ns(event.duration)
 
 	p := &trace.processes[p_idx]
-	p.min_time = min(p.min_time, event.timestamp)
+	p.min_time = min(p.min_time, ts)
 
 	t := &p.threads[t_idx]
-	t.min_time = min(t.min_time, event.timestamp)
-	t.max_time = max(t.max_time, event.timestamp + event.duration)
+	t.min_time = min(t.min_time, ts)
+	t.max_time = max(t.max_time, ts + dur)
 
-	trace.total_min_time = min(trace.total_min_time, event.timestamp)
-	trace.total_max_time = max(trace.total_max_time, event.timestamp + event.duration)
+	trace.total_min_time = min(trace.total_min_time, ts)
+	trace.total_max_time = max(trace.total_max_time, ts + dur)
 
 	append_event(&t.events, event)
 	return p_idx, t_idx, len(t.events)-1
@@ -995,12 +1005,14 @@ instant_rendersort_proc :: proc(a, b: Instant) -> bool {
 // duration bounding is important when sorting, we don't want to accidentally a -1 somewhere
 insertion_sort_events :: proc(events: []Event, max_time: i64) {
 	event_buildsort :: proc(max_time: i64, a, b: Event) -> bool {
-		if a.timestamp == b.timestamp {
+		ts_a := unpack_ns(a.timestamp)
+		ts_b := unpack_ns(b.timestamp)
+		if ts_a == ts_b {
 			_a := a
 			_b := b
 			return bound_duration(&_a, max_time) > bound_duration(&_b, max_time)
 		}
-		return a.timestamp < b.timestamp
+		return ts_a < ts_b
 	}
 
 	for i := 1; i < len(events); i += 1 {
@@ -1038,16 +1050,17 @@ json_process_events :: proc(trace: ^Trace) {
 
 			stack_clear(&ev_stack)
 			for event, e_idx in &tm.events {
-				cur_start := event.timestamp
-				cur_end   := event.timestamp + bound_duration(&event, tm.max_time)
+				cur_start := unpack_ns(event.timestamp)
+				cur_end   := cur_start + bound_duration(&event, tm.max_time)
 				if ev_stack.len == 0 {
 					stack_push_back(&ev_stack, e_idx)
 				} else {
 					prev_e_idx := stack_peek_back(&ev_stack)
 					prev_ev := tm.events[prev_e_idx]
 
-					prev_start := prev_ev.timestamp
-					prev_end   := prev_ev.timestamp + bound_duration(&prev_ev, tm.max_time)
+					prev_ts := unpack_ns(prev_ev.timestamp)
+					prev_start := prev_ts
+					prev_end   := prev_ts + bound_duration(&prev_ev, tm.max_time)
 
 					// if it fits within the parent
 					if cur_start >= prev_start && cur_end <= prev_end {
@@ -1059,8 +1072,9 @@ json_process_events :: proc(trace: ^Trace) {
 							prev_e_idx = stack_peek_back(&ev_stack)
 							prev_ev = tm.events[prev_e_idx]
 
-							prev_start = prev_ev.timestamp
-							prev_end   = prev_ev.timestamp + bound_duration(&prev_ev, tm.max_time)
+							prev_ts := unpack_ns(prev_ev.timestamp)
+							prev_start = prev_ts
+							prev_end   = prev_ts + bound_duration(&prev_ev, tm.max_time)
 
 							if cur_start >= prev_start && cur_end > prev_end {
 								stack_pop_back(&ev_stack)
@@ -1123,8 +1137,9 @@ json_generate_selftimes :: proc(trace: ^Trace) {
 					tree_stack := [128]uint{}
 					stack_len := 0
 
-					start_time := ev.timestamp - trace.total_min_time
-					end_time := ev.timestamp + bound_duration(&ev, tm.max_time) - trace.total_min_time
+					ts := unpack_ns(ev.timestamp)
+					start_time := ts - trace.total_min_time
+					end_time := ts + bound_duration(&ev, tm.max_time) - trace.total_min_time
 
 					child_time : i64 = 0
 					tree_stack[0] = depth.head; stack_len += 1
@@ -1147,12 +1162,13 @@ json_generate_selftimes :: proc(trace: ^Trace) {
 							scan_arr := depth.events[cur_node.event_start_idx:cur_node.event_start_idx+uint(cur_node.event_arr_len)]
 							weight : i64 = 0
 							scan_loop: for scan_ev in &scan_arr {
-								scan_ev_start_time := scan_ev.timestamp - trace.total_min_time
+								ts := unpack_ns(scan_ev.timestamp)
+								scan_ev_start_time := ts - trace.total_min_time
 								if scan_ev_start_time < start_time {
 									continue
 								}
 
-								scan_ev_end_time := scan_ev.timestamp + bound_duration(&scan_ev, tm.max_time) - trace.total_min_time
+								scan_ev_end_time := ts + bound_duration(&scan_ev, tm.max_time) - trace.total_min_time
 								if scan_ev_end_time > end_time {
 									break scan_loop
 								}

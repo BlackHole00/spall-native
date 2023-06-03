@@ -82,7 +82,9 @@ free_trace :: proc(trace: ^Trace) {
 }
 
 bound_duration :: proc(ev: ^Event, max_ts: i64) -> i64 {
-	return ev.duration < 0 ? (max_ts - ev.timestamp) : ev.duration
+	dur := unpack_ns(ev.duration)
+	ts := unpack_ns(ev.timestamp)
+	return dur < 0 ? (max_ts - ts) : dur
 }
 
 find_idx :: proc(trace: ^Trace, events: []Event, val: i64) -> int {
@@ -94,8 +96,11 @@ find_idx :: proc(trace: ^Trace, events: []Event, val: i64) -> int {
 		mid := (low + high) / 2
 
 		ev := events[mid]
-		ev_start := ev.timestamp - trace.total_min_time
-		ev_end := ev_start + ev.duration
+		ts := unpack_ns(ev.timestamp)
+		dur := unpack_ns(ev.duration)
+
+		ev_start := ts - trace.total_min_time
+		ev_end := ev_start + dur
 
 		if (val >= ev_start && val <= ev_end) {
 			return mid
@@ -213,10 +218,12 @@ chunk_events :: proc(trace: ^Trace) {
 
 					start_ev := scan_arr[0]
 					end_ev := scan_arr[len(scan_arr)-1]
+					start_ts := unpack_ns(start_ev.timestamp)
+					end_ts := unpack_ns(end_ev.timestamp)
 
 					node := ChunkNode{}
-					node.start_time = start_ev.timestamp - trace.total_min_time
-					node.end_time   = end_ev.timestamp + bound_duration(&end_ev, tm.max_time) - trace.total_min_time
+					node.start_time = start_ts - trace.total_min_time
+					node.end_time   = end_ts + bound_duration(&end_ev, tm.max_time) - trace.total_min_time
 
 					node.event_start_idx = uint(start_idx)
 					node.event_arr_len  = i8(len(scan_arr))
@@ -298,8 +305,9 @@ generate_selftimes :: proc(trace: ^Trace) {
 					tree_stack := [128]uint{}
 					stack_len := 0
 
-					start_time := ev.timestamp - trace.total_min_time
-					end_time := ev.timestamp + bound_duration(&ev, tm.max_time) - trace.total_min_time
+					ts := unpack_ns(ev.timestamp)
+					start_time := ts - trace.total_min_time
+					end_time := ts + bound_duration(&ev, tm.max_time) - trace.total_min_time
 
 					child_time : i64 = 0
 					tree_stack[0] = depth.head; stack_len += 1
@@ -322,12 +330,13 @@ generate_selftimes :: proc(trace: ^Trace) {
 							scan_arr := depth.events[cur_node.event_start_idx:cur_node.event_start_idx+uint(cur_node.event_arr_len)]
 							weight : i64 = 0
 							scan_loop: for scan_ev in &scan_arr {
-								scan_ev_start_time := scan_ev.timestamp - trace.total_min_time
+								scan_ts := unpack_ns(scan_ev.timestamp)
+								scan_ev_start_time := scan_ts - trace.total_min_time
 								if scan_ev_start_time < start_time {
 									continue
 								}
 
-								scan_ev_end_time := scan_ev.timestamp + bound_duration(&scan_ev, tm.max_time) - trace.total_min_time
+								scan_ev_end_time := scan_ts + bound_duration(&scan_ev, tm.max_time) - trace.total_min_time
 								if scan_ev_end_time > end_time {
 									break scan_loop
 								}

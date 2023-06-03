@@ -199,11 +199,12 @@ Instant :: struct #packed {
 	name: u32,
 	timestamp: i64,
 }
+
 Event :: struct #packed {
+	timestamp: [6]u8,
+	duration:  [6]u8,
 	name: u32,
 	args: u32,
-	timestamp: i64,
-	duration: i64,
 	self_time: i64,
 }
 
@@ -373,4 +374,21 @@ print_stack :: proc(s: ^$Q/Stack($T)) {
 		fmt.printf("%#v\n", s.arr[i])
 	}
 	fmt.printf("}}\n")
+}
+
+unpack_ns :: proc(packed: [6]u8) -> i64 {
+	ret : u64 = 0
+	ret |= u64(packed[0]) << 56
+	ret |= u64(packed[1]) << 48
+	ret |= u64(packed[2]) << 40
+	ret |= u64(packed[3]) << 32
+	ret |= u64(packed[4]) << 24
+    ret |= u64(packed[5]) << 16
+
+	return i64(ret)
+}
+
+pack_ns :: proc(val: i64) -> [6]u8 {
+	tmp := transmute([8]u8)val
+	return [6]u8{tmp[7], tmp[6], tmp[5], tmp[4], tmp[3], tmp[2]}
 }

@@ -79,20 +79,24 @@ ms_push_event :: proc(trace: ^Trace, process_id, thread_id: u32, event: ^Event) 
 	t_idx := setup_tid(trace, p_idx, thread_id)
 
 	p := &trace.processes[p_idx]
-	p.min_time = min(p.min_time, event.timestamp)
+
+	ts := unpack_ns(event.timestamp)
+	dur := unpack_ns(event.duration)
+
+	p.min_time = min(p.min_time, ts)
 
 	t := &p.threads[t_idx]
-	t.min_time = min(t.min_time, event.timestamp)
-	if t.max_time > event.timestamp {
+	t.min_time = min(t.min_time, ts)
+	if t.max_time > ts {
 		post_error(trace, 
 			"Woah, time-travel? You just had a begin event that started before a previous one; [pid: %d, tid: %d, name: %s, event: %v, event_count: %d]", 
 			process_id, thread_id, in_getstr(&trace.string_block, event.name), event, trace.event_count)
 		return 0, 0, 0, false
 	}
-	t.max_time = event.timestamp + event.duration
+	t.max_time = ts + dur
 
-	trace.total_min_time = min(trace.total_min_time, event.timestamp)
-	trace.total_max_time = max(trace.total_max_time, event.timestamp + event.duration)
+	trace.total_min_time = min(trace.total_min_time, ts)
+	trace.total_max_time = max(trace.total_max_time, ts + dur)
 
 	if int(t.current_depth) >= len(t.depths) {
 		depth := Depth{
@@ -154,9 +158,9 @@ ms_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 		case .Begin:
 			ev.name = temp_ev.name
 			ev.args = temp_ev.args
-			ev.duration = -1
+			ev.duration = pack_ns(-1)
 			ev.self_time = 0
-			ev.timestamp = temp_ev.timestamp
+			ev.timestamp = pack_ns(temp_ev.timestamp)
 
 			p_idx, t_idx, e_idx, ok := ms_push_event(trace, temp_ev.process_id, temp_ev.thread_id, &ev)
 			if !ok {
@@ -184,18 +188,20 @@ ms_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 
 				depth := &thread.depths[thread.current_depth]
 				jev := &depth.events[jev_idx]
-				jev.duration = temp_ev.timestamp - jev.timestamp
-				jev.self_time = jev.duration - jev.self_time
-				thread.max_time = max(thread.max_time, jev.timestamp + jev.duration)
-				trace.total_max_time = max(trace.total_max_time, jev.timestamp + jev.duration)
+				jev_ts := unpack_ns(jev.timestamp)
+				jev_dur := temp_ev.timestamp - jev_ts
+
+				jev.duration = pack_ns(jev_dur)
+				jev.self_time = jev_dur - jev.self_time
+				thread.max_time = max(thread.max_time, jev_ts + jev_dur)
+				trace.total_max_time = max(trace.total_max_time, jev_ts + jev_dur)
 
 				if thread.bande_q.len > 0 {
 					parent_depth := &thread.depths[thread.current_depth - 1]
 					parent_ev_idx := stack_peek_back(&thread.bande_q)
 
 					pev := &parent_depth.events[parent_ev_idx]
-
-					pev.self_time += jev.duration
+					pev.self_time += jev_dur
 				}
 			}
 		}
@@ -213,8 +219,9 @@ ms_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 				depth := &thread.depths[ev_depth]
 				jev := &depth.events[jev_idx]
 
-				thread.max_time = max(thread.max_time, jev.timestamp)
-				trace.total_max_time = max(trace.total_max_time, jev.timestamp)
+				jev_ts := unpack_ns(jev.timestamp)
+				thread.max_time = max(thread.max_time, jev_ts)
+				trace.total_max_time = max(trace.total_max_time, jev_ts)
 
 				duration := bound_duration(jev, thread.max_time)
 				jev.self_time = duration - jev.self_time
