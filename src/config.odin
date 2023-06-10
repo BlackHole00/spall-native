@@ -187,6 +187,9 @@ print_tree :: proc(tree: []ChunkNode, head: uint) {
 }
 
 chunk_events :: proc(trace: ^Trace) {
+	lod_mem_usage := 0
+	ev_mem_usage := 0
+
 	for proc_v, p_idx in &trace.processes {
 		for tm, t_idx in &proc_v.threads {
 			for depth, d_idx in &tm.depths {
@@ -206,6 +209,10 @@ chunk_events :: proc(trace: ^Trace) {
 				}
 
 				tm.depths[d_idx].tree = make([dynamic]ChunkNode, 0, max_nodes)
+
+				lod_mem_usage += size_of(ChunkNode) * max_nodes
+				ev_mem_usage += size_of(Event) * len(depth.events)
+
 				tree := &tm.depths[d_idx].tree
 
 				for i := 0; i < bucket_count; i += 1 {
@@ -273,6 +280,8 @@ chunk_events :: proc(trace: ^Trace) {
 			}
 		}
 	}
+
+	fmt.printf("LOD memory: %v MB | Event memory: %v MB\n", f64(lod_mem_usage) / 1024 / 1024, f64(ev_mem_usage) / 1024 / 1024)
 }
 
 generate_selftimes :: proc(trace: ^Trace) {
