@@ -564,10 +564,12 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 	chunk_events(trace)
 	fmt.printf("generate spatial partitions -- %f ms\n", time.duration_milliseconds(time.tick_since(start_time)))
 
-	start_time = time.tick_now()
 	if file_type == .Json {
+		start_time = time.tick_now()
+
 		json_generate_selftimes(trace)
 		trace.stamp_scale = 1
+
+		fmt.printf("generate selftimes -- %f ms\n", time.duration_milliseconds(time.tick_since(start_time)))
 	}
-	fmt.printf("generate selftimes -- %f ms\n", time.duration_milliseconds(time.tick_since(start_time)))
 }
