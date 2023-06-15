@@ -116,7 +116,7 @@ idx_pos := [?]glm.vec2{
 
 reset_flamegraph_camera :: proc(trace: ^Trace, ui_state: ^UIState) {
 	cam = Camera{Vec2{0, 0}, Vec2{0, 0}, 0, 1, 1}
-	if trace.event_count == 0 { trace.total_min_time = 0; trace.total_max_time = 1000 }
+	if trace.event_count == 0 { trace.total_min_time = 0; trace.total_max_time = 100000; trace.stamp_scale = 1; }
 
 	start_time: f64 = 0
 	end_time  := f64(trace.total_max_time - trace.total_min_time)
