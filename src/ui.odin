@@ -520,37 +520,41 @@ draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRe
 	info_pane_rect := ui_state.info_pane_rect
 
 	// graph-relative timebar and subdivisions
-	division, draw_tick_start: f64
+	division_ns, draw_tick_start_ns: f64
 	ticks: int
 	{
-		window_range := (full_flamegraph_rect.w / cam.current_scale) * trace.stamp_scale
-		v1 := math.log10(window_range)
+		// figure out how many divisions to split the current scale into
+		window_range_ns := (full_flamegraph_rect.w / cam.current_scale) * trace.stamp_scale
+		v1 := math.log10(window_range_ns)
 		v2 := math.floor(v1)
 		rem := v1 - v2
 
+		division_ns = math.pow(10, v2)                           // multiples of 10
+		if rem < 0.3      { division_ns -= (division_ns * 0.8) } // multiples of 2
+		else if rem < 0.6 { division_ns -= (division_ns / 2)   } // multiples of 5
 
-		division = math.pow(10, v2)                        // multiples of 10
-		if rem < 0.3      { division -= (division * 0.8) } // multiples of 2
-		else if rem < 0.6 { division -= (division / 2)   } // multiples of 5
+		// find the current range in ns
+		display_range_start_ns := (                     (0 - cam.pan.x) / cam.current_scale) * trace.stamp_scale
+		display_range_end_ns   := ((full_flamegraph_rect.w - cam.pan.x) / cam.current_scale) * trace.stamp_scale
 
-		display_range_start := (-cam.pan.x / cam.current_scale) * trace.stamp_scale
-		display_range_end := ((full_flamegraph_rect.w - cam.pan.x) / cam.current_scale) * trace.stamp_scale
+		// round down to make sure we get the first line on screen
+		draw_tick_start_ns = f_round_down(display_range_start_ns, division_ns)
+		draw_tick_end_ns  := f_round_down(display_range_end_ns,   division_ns)
 
-		draw_tick_start = f_round_down(display_range_start, division)
-		draw_tick_end  := f_round_down(display_range_end, division)
-		tick_range := (draw_tick_end - draw_tick_start)
-
-		ticks = int(tick_range / division) + 3
+		// determine how many divisions to draw, with fudge-factor
+		tick_range_ns := draw_tick_end_ns - draw_tick_start_ns
+		ticks = int(tick_range_ns / division_ns) + 3
 
 		subdivisions := 5
 		line_x_start := -4
 		line_x_end   := ticks * subdivisions
 
+		// actually draw the lines
 		line_start := full_flamegraph_rect.y + flamegraph_header_height - ui_state.top_line_gap
 		line_height := full_flamegraph_rect.h
 		for i := line_x_start; i < line_x_end; i += 1 {
-			tick_time := draw_tick_start + (f64(i) * (division / f64(subdivisions)))
-			scaled_tick_time := tick_time / trace.stamp_scale
+			tick_time_ns := draw_tick_start_ns + (f64(i) * (division_ns / f64(subdivisions)))
+			scaled_tick_time := tick_time_ns / trace.stamp_scale
 			x_off := (scaled_tick_time * cam.current_scale) + cam.pan.x
 			color := (i % subdivisions) != 0 ? subdivision_color : division_color
 
@@ -787,18 +791,18 @@ draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRe
 	time_high_y := full_flamegraph_rect.y + flamegraph_toptext_height - (2 * em) - (2 * (em / 3))
 	time_tick_y := full_flamegraph_rect.y + flamegraph_toptext_height - (em)     - (2 * (em / 3))
 
-	div_clump_idx, fract_val, period := get_div_clump_idx(division)
+	div_clump_idx, fract_val, period := get_div_clump_idx(division_ns)
 	text_side_pad := em
 	old_tick_val: f64 = 0
-	early_str, _, early_tick := clump_time(f_round_down(draw_tick_start, division), div_clump_idx)
+	early_str, _, early_tick := clump_time(f_round_down(draw_tick_start_ns, division_ns), div_clump_idx)
 	old_tick_val = early_tick
 
 	for i := -1; i < ticks; i += 1 {
-		tick_time := draw_tick_start + (f64(i) * division)
-		scaled_tick_time := tick_time / trace.stamp_scale
+		tick_time_ns := draw_tick_start_ns + (f64(i) * division_ns)
+		scaled_tick_time := tick_time_ns / trace.stamp_scale
 		x_off := (scaled_tick_time * cam.current_scale) + cam.pan.x
 
-		start_str, tick_str, new_tick_val := clump_time(tick_time, div_clump_idx)
+		start_str, tick_str, new_tick_val := clump_time(tick_time_ns, div_clump_idx)
 
 		draw_top := false
 		if new_tick_val != old_tick_val || fract_val > (period / 2) {
@@ -818,7 +822,7 @@ draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRe
 	}
 
 	{
-		scaled_tick_time := draw_tick_start / trace.stamp_scale
+		scaled_tick_time := draw_tick_start_ns / trace.stamp_scale
 		x_off := (scaled_tick_time * cam.current_scale) + cam.pan.x
 		if len(early_str) > 0 {
 			top_text_width := measure_text(early_str, .PSize, .DefaultFont)
