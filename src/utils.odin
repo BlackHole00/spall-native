@@ -206,6 +206,7 @@ clump_time :: proc(time: f64, div_clump_idx: int) -> (string, string, f64) {
 	_time := time
 	if time < 0 {
 		_time = math.abs(time)
+		return "", "", 0
 	}
 
 	// preserving precision as much as possible while getting the fractional bits
