@@ -112,6 +112,37 @@ ONE_MILLI  :: 1000 * 1000
 ONE_MICRO  :: 1000
 ONE_NANO   :: 1
 
+tens_fmt :: proc(x: u64, allocator := context.temp_allocator) -> string {
+	val_buf := [32]u8{}
+	chars := [?]u8{'0', '1', '2', '3', '4', '5' , '6', '7', '8', '9'}
+
+	tmp := x
+	pos := 0
+	for tmp := x; tmp != 0; pos += 1 {
+		val_buf[pos] = chars[tmp % 10]
+		tmp /= 10
+	}
+
+	digit_count := pos
+	skip_first := (digit_count % 3) == 0
+
+	out_buf := [32]u8{}
+	idx := 0
+	for i := 0; i < digit_count; i += 1 {
+		if (pos % 3) == 0 && !(i == 0 && skip_first) {
+			out_buf[idx] = ','
+			idx += 1
+		}
+
+		out_buf[idx] = val_buf[pos-1]
+
+		pos -= 1
+		idx += 1
+	}
+
+	return strings.clone_from_bytes(out_buf[:idx], allocator)
+}
+
 tooltip_fmt :: proc(time: f64) -> string {
 	if time >= ONE_SECOND {
 		cur_time := time / ONE_SECOND

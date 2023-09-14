@@ -455,7 +455,7 @@ load_executable :: proc(trace: ^Trace, file_name: string) -> bool {
 		return false
 	}
 
-	fmt.printf("Loaded %d symbols!\n", len(trace.addr_map.entries))
+	fmt.printf("Loaded %s symbols!\n", tens_fmt(u64(len(trace.addr_map.entries))))
 
 	return true
 }

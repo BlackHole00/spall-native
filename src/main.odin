@@ -210,7 +210,7 @@ threaded_config_load :: proc(pool: ^Pool, data: rawptr) {
 	start_time := time.tick_now()
 	load_file(trace, filename)
 	duration := time.tick_since(start_time)
-	fmt.printf("runtime: %f ms, got %d events\n", time.duration_milliseconds(duration), trace.event_count)
+	fmt.printf("runtime: %f ms, got %s events\n", time.duration_milliseconds(duration), tens_fmt(u64(trace.event_count)))
 
 	loading_config = false
 	post_loading = true
@@ -368,7 +368,6 @@ main :: proc() {
 		width = width * dpr
 		height = height * dpr
 	}
-	fmt.printf("%v, %v\n", width, height)
 
 	lru.init(&lru_text_cache, 1000)
 	lru_text_cache.on_remove = rm_text_cache

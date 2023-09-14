@@ -1407,7 +1407,7 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState)
 		}
 
 		loading_str := "Stats loading..."
-		progress_str := fmt.tprintf("%d of %d", cur_count, total_count)
+		progress_str := fmt.tprintf("%s of %s", tens_fmt(u64(cur_count)), tens_fmt(u64(total_count)))
 		hint_str := "Release multi-select to get the rest of the stats"
 
 		strs := []string{ loading_str, progress_str }
