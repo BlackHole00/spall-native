@@ -63,6 +63,7 @@ DWARF32_V5_Line_Header :: struct #packed {
 }
 
 DWARF32_V4_Line_Header :: struct #packed {
+	header_length:   u32,
 	min_inst_length:  u8,
 	max_ops_per_inst: u8,
 	default_is_stmt:  u8,
@@ -72,6 +73,7 @@ DWARF32_V4_Line_Header :: struct #packed {
 }
 
 DWARF32_V3_Line_Header :: struct #packed {
+	header_length:   u32,
 	min_inst_length:  u8,
 	default_is_stmt:  u8,
 	line_base:        i8,
@@ -80,6 +82,7 @@ DWARF32_V3_Line_Header :: struct #packed {
 }
 
 DWARF_Line_Header :: struct {
+	header_length:        u32,
 	address_size:          u8,
 	segment_selector_size: u8,
 	min_inst_length:       u8,
@@ -98,6 +101,46 @@ Dw_LNCT :: enum u8 {
 	md5             = 5,
 }
 
+File_Unit :: struct {
+	name:    string,
+	dir_idx:    int,
+}
+
+Line_Machine :: struct {
+	address:         u64,
+	op_idx:          u32,
+	file_idx:        u32,
+	line_num:        u32,
+	col_num:         u32,
+	is_stmt:        bool,
+	basic_block:    bool,
+	end_sequence:   bool,
+	prologue_end:   bool,
+	epilogue_end:   bool,
+	epilogue_begin: bool,
+	isa:             u32,
+	discriminator:   u32,
+}
+
+Line_Table :: struct {
+	op_buffer:       []u8,
+	default_is_stmt: bool,
+	line_base:         i8,
+	line_range:        u8,
+	opcode_base:       u8,
+
+	lines: []Line_Machine,
+}
+
+Line_Info :: struct {
+	address:  u64,
+	is_func_frame_start: bool,
+	is_func_frame_end:   bool,
+	line_num: u32,
+	col_num:  u32,
+	file_idx: u32,
+}
+
 DWARF_Context :: struct {
 	bits_64: bool,
 	version: int,
@@ -112,6 +155,7 @@ parse_line_header :: proc(ctx: ^DWARF_Context, blob: []u8) -> (DWARF_Line_Header
 				return {}, 0, false
 			}
 
+			common_hdr.header_length         = hdr.header_length
 			common_hdr.address_size          = hdr.address_size
 			common_hdr.segment_selector_size = hdr.segment_selector_size
 			common_hdr.min_inst_length       = hdr.min_inst_length
@@ -128,6 +172,7 @@ parse_line_header :: proc(ctx: ^DWARF_Context, blob: []u8) -> (DWARF_Line_Header
 				return {}, 0, false
 			}
 
+			common_hdr.header_length         = hdr.header_length
 			common_hdr.address_size          = 4
 			common_hdr.segment_selector_size = 0
 			common_hdr.min_inst_length       = hdr.min_inst_length
@@ -144,6 +189,7 @@ parse_line_header :: proc(ctx: ^DWARF_Context, blob: []u8) -> (DWARF_Line_Header
 				return {}, 0, false
 			}
 
+			common_hdr.header_length         = hdr.header_length
 			common_hdr.address_size          = 4
 			common_hdr.segment_selector_size = 0
 			common_hdr.min_inst_length       = hdr.min_inst_length
@@ -181,10 +227,15 @@ read_uleb :: proc(buffer: []u8) -> (u64, int, bool) {
 }
 
 load_dwarf :: proc(trace: ^Trace, line_buffer, line_str_buffer, abbrev_buffer, info_buffer: []u8) -> bool {
-	dir_table := make([dynamic]string)
+	dir_table  := make([dynamic]string)
+	file_table := make([dynamic]File_Unit)
+	line_tables := make([dynamic]Line_Table)
 	append(&dir_table, ".")
 
+	pass := 0
 	for i := 0; i < len(line_buffer); {
+		pass += 1
+
 		unit_length := slice_to_type(line_buffer[i:], u32) or_return
 		if unit_length == 0xFFFF_FFFF { 
 			fmt.printf("Only supporting DWARF32 for now!\n")
@@ -207,6 +258,9 @@ load_dwarf :: proc(trace: ^Trace, line_buffer, line_str_buffer, abbrev_buffer, i
 		line_hdr, size := parse_line_header(&ctx, line_buffer[i:]) or_return
 		i += size
 
+		fmt.printf("parsing DWARF %v\n", version)
+		fmt.printf("line header: %#v\n", line_hdr)
+
 		if line_hdr.opcode_base != 13 {
 			fmt.printf("Unable to support custom line table ops!\n")
 			return false
@@ -216,36 +270,88 @@ load_dwarf :: proc(trace: ^Trace, line_buffer, line_str_buffer, abbrev_buffer, i
 		opcode_table_len := line_hdr.opcode_base - 1
 		i += int(opcode_table_len)
 
-		dir_entry_fmt_count := slice_to_type(line_buffer[i:], u8) or_return
-		i += size_of(dir_entry_fmt_count)
+		if version == 5 {
+			dir_entry_fmt_count := slice_to_type(line_buffer[i:], u8) or_return
+			i += size_of(dir_entry_fmt_count)
 
-		for j := 0; j < int(dir_entry_fmt_count); j += 1 {
-			content_type, size1 := read_uleb(line_buffer[i:]) or_return
-			i += size1
+			for j := 0; j < int(dir_entry_fmt_count); j += 1 {
+				content_type, size1 := read_uleb(line_buffer[i:]) or_return
+				i += size1
 
-			content_code := Dw_LNCT(content_type)
+				content_code := Dw_LNCT(content_type)
 
-			form_type, size2 := read_uleb(line_buffer[i:]) or_return
+				form_type, size2 := read_uleb(line_buffer[i:]) or_return
+				i += size2
+
+				form_code := Dw_Form(form_type)
+			}
+
+			dir_name_count, size2 := read_uleb(line_buffer[i:]) or_return
 			i += size2
 
-			form_code := Dw_Form(form_type)
+			for j := 0; j < int(dir_name_count); j += 1 {
+				str_idx := slice_to_type(line_buffer[i:], u32) or_return
+
+				cstr_dir_name := cstring(raw_data(line_str_buffer[str_idx:]))
+				dir_name := strings.clone_from_cstring(cstr_dir_name)
+				append(&dir_table, dir_name)
+
+				i += size_of(u32)
+			}
+		} else { // For DWARF 4, 3, 2, etc.
+			fmt.printf("pass %v\n", pass)
+			for {
+				cstr_dir_name := cstring(raw_data(line_buffer[i:]))
+
+				i += len(cstr_dir_name) + 1
+				if len(cstr_dir_name) == 0 {
+					break
+				}
+
+				dir_name := strings.clone_from_cstring(cstr_dir_name)
+				append(&dir_table, dir_name)
+
+				fmt.printf("dir %s\n", dir_name)
+			}
+
+			for {
+				cstr_file_name := cstring(raw_data(line_buffer[i:]))
+
+				i += len(cstr_file_name) + 1
+				if len(cstr_file_name) == 0 {
+					break
+				}
+
+				dir_idx, size := read_uleb(line_buffer[i:]) or_return
+				i += size
+
+				last_modified, size2 := read_uleb(line_buffer[i:]) or_return
+				i += size2
+
+				file_size, size3 := read_uleb(line_buffer[i:]) or_return
+				i += size3
+
+				file_name := strings.clone_from_cstring(cstr_file_name)
+				append(&file_table, File_Unit{name = file_name, dir_idx = int(dir_idx)})
+
+				fmt.printf("- file %s | %d\n", file_name, dir_idx)
+			}
+
+			full_cu_size := unit_length + size_of(unit_length)
+			hdr_size := size_of(unit_length) + size_of(version) + int(line_hdr.header_length) + size_of(u32)
+			rem_size := int(full_cu_size) - hdr_size
+
+			append(&line_tables, Line_Table{
+				op_buffer   = line_buffer[i:i+rem_size],
+				opcode_base = line_hdr.opcode_base,
+				line_base   = line_hdr.line_base,
+				line_range  = line_hdr.line_range,
+			})
+			i += rem_size
 		}
-
-		dir_name_count, size2 := read_uleb(line_buffer[i:]) or_return
-		i += size2
-
-		for j := 0; j < int(dir_name_count); j += 1 {
-			str_idx := slice_to_type(line_buffer[i:], u32) or_return
-
-			cstr_dir_name := cstring(raw_data(line_str_buffer[str_idx:]))
-			dir_name := strings.clone_from_cstring(cstr_dir_name)
-			append(&dir_table, dir_name)
-
-			i += size_of(u32)
-		}
-
-		os.exit(0)
 	}
+
+	if true { os.exit(0) }
 
 	return false
 }
