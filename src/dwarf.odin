@@ -50,6 +50,19 @@ Dw_Form :: enum {
 	addrx4         = 0x2c,
 }
 
+Dw_LNCT :: enum u8 {
+	path            = 1,
+	directory_index = 2,
+	timestamp       = 3,
+	size            = 4,
+	md5             = 5,
+}
+
+LineFmtEntry :: struct {
+	content: Dw_LNCT,
+	form: Dw_Form,
+}
+
 DWARF32_V5_Line_Header :: struct #packed {
 	address_size:           u8,
 	segment_selector_size:  u8,
@@ -93,13 +106,6 @@ DWARF_Line_Header :: struct {
 	opcode_base:           u8,
 }
 
-Dw_LNCT :: enum u8 {
-	path            = 1,
-	directory_index = 2,
-	timestamp       = 3,
-	size            = 4,
-	md5             = 5,
-}
 
 File_Unit :: struct {
 	name:    string,
@@ -232,9 +238,9 @@ load_dwarf :: proc(trace: ^Trace, line_buffer, line_str_buffer, abbrev_buffer, i
 	line_tables := make([dynamic]Line_Table)
 	append(&dir_table, ".")
 
-	pass := 0
-	for i := 0; i < len(line_buffer); {
-		pass += 1
+	pass := 1
+	for i := 0; i < len(line_buffer); pass += 1{
+		fmt.printf("pass %v\n", pass)
 
 		unit_length := slice_to_type(line_buffer[i:], u32) or_return
 		if unit_length == 0xFFFF_FFFF { 
@@ -274,6 +280,8 @@ load_dwarf :: proc(trace: ^Trace, line_buffer, line_str_buffer, abbrev_buffer, i
 			dir_entry_fmt_count := slice_to_type(line_buffer[i:], u8) or_return
 			i += size_of(dir_entry_fmt_count)
 
+			fmt_parse := [255]LineFmtEntry{}
+			fmt_parse_len := 0
 			for j := 0; j < int(dir_entry_fmt_count); j += 1 {
 				content_type, size1 := read_uleb(line_buffer[i:]) or_return
 				i += size1
@@ -284,22 +292,128 @@ load_dwarf :: proc(trace: ^Trace, line_buffer, line_str_buffer, abbrev_buffer, i
 				i += size2
 
 				form_code := Dw_Form(form_type)
+
+				fmt_parse[fmt_parse_len] = LineFmtEntry{content_code, form_code}
+				fmt_parse_len += 1
 			}
 
 			dir_name_count, size2 := read_uleb(line_buffer[i:]) or_return
 			i += size2
 
 			for j := 0; j < int(dir_name_count); j += 1 {
-				str_idx := slice_to_type(line_buffer[i:], u32) or_return
+				for k := 0; k < fmt_parse_len; k += 1 {
 
-				cstr_dir_name := cstring(raw_data(line_str_buffer[str_idx:]))
-				dir_name := strings.clone_from_cstring(cstr_dir_name)
-				append(&dir_table, dir_name)
+					def_block := fmt_parse[k]
+					#partial switch def_block.content {
+						case .path: {
+							if def_block.form != .line_strp {
+								fmt.printf("Unhandled line parser type! %v\n", def_block.form)
+								return false
+							}
 
-				i += size_of(u32)
+							str_idx := slice_to_type(line_buffer[i:], u32) or_return
+
+							cstr_dir_name := cstring(raw_data(line_str_buffer[str_idx:]))
+							dir_name := strings.clone_from_cstring(cstr_dir_name)
+							append(&dir_table, dir_name)
+
+							i += size_of(u32)
+						} case: {
+							fmt.printf("Unhandled line parser type! %v\n", def_block.content)
+							return false
+						}
+					}
+				}
 			}
+
+			file_entry_fmt_count := slice_to_type(line_buffer[i:], u8) or_return
+			i += size_of(file_entry_fmt_count)
+
+			fmt_parse = {}
+			fmt_parse_len = 0
+			for j := 0; j < int(file_entry_fmt_count); j += 1 {
+				content_type, size1 := read_uleb(line_buffer[i:]) or_return
+				i += size1
+
+				content_code := Dw_LNCT(content_type)
+
+				form_type, size2 := read_uleb(line_buffer[i:]) or_return
+				i += size2
+
+				form_code := Dw_Form(form_type)
+
+				fmt_parse[fmt_parse_len] = LineFmtEntry{content_code, form_code}
+				fmt_parse_len += 1
+			}
+
+			file_name_count, size3 := read_uleb(line_buffer[i:]) or_return
+			i += size3
+
+			for j := 0; j < int(file_name_count); j += 1 {
+				file := File_Unit{}
+				for k := 0; k < fmt_parse_len; k += 1 {
+					def_block := fmt_parse[k]
+					#partial switch def_block.content {
+						case .path: {
+							if def_block.form != .line_strp {
+								fmt.printf("Unhandled line parser type! %v\n", def_block.form)
+								return false
+							}
+
+							str_idx := slice_to_type(line_buffer[i:], u32) or_return
+
+							cstr_file_name := cstring(raw_data(line_str_buffer[str_idx:]))
+							file.name = strings.clone_from_cstring(cstr_file_name)
+
+							i += size_of(u32)
+						} case .directory_index: {
+							#partial switch def_block.form {
+								case .data1: {
+									dir_idx := slice_to_type(line_buffer[i:], u8) or_return
+									file.dir_idx = int(dir_idx)
+									i += size_of(u8)
+								} case .data2: {
+									dir_idx := slice_to_type(line_buffer[i:], u16) or_return
+									file.dir_idx = int(dir_idx)
+									i += size_of(u16)
+								} case .udata: {
+									dir_idx, size := read_uleb(line_buffer[i:]) or_return
+									file.dir_idx = int(dir_idx)
+									i += size
+								} case: {
+									fmt.printf("Invalid directory index size! %v\n", def_block.form)
+									return false
+								}
+							}
+						} case: {
+							fmt.printf("Unhandled line parser type! %v\n", def_block.content)
+							return false
+						}
+					}
+				}
+
+				append(&file_table, file)
+			}
+
+			/*
+			full_cu_size := unit_length + size_of(unit_length)
+			hdr_size := size_of(unit_length) + size_of(version) + int(line_hdr.header_length) + size_of(u32)
+			rem_size := int(full_cu_size) - hdr_size
+			fmt.printf("rem size: %v\n", rem_size)
+
+			append(&line_tables, Line_Table{
+				op_buffer   = line_buffer[i:i+rem_size],
+				opcode_base = line_hdr.opcode_base,
+				line_base   = line_hdr.line_base,
+				line_range  = line_hdr.line_range,
+			})
+			i += rem_size
+			*/
+
+			fmt.printf("TODO: need to skip to end of CU\n")
+			os.exit(0)
+
 		} else { // For DWARF 4, 3, 2, etc.
-			fmt.printf("pass %v\n", pass)
 			for {
 				cstr_dir_name := cstring(raw_data(line_buffer[i:]))
 
