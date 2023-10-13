@@ -1,6 +1,7 @@
 package main
 
 import "core:fmt"
+import "core:strings"
 
 Vec2 :: [2]f64
 FVec2 :: [2]f32
@@ -239,8 +240,13 @@ Stats :: struct {
 
 Line_Info :: struct {
 	address:  u64,
-	file_idx: u32,
 	line_num: u32,
+	filename: string,
+}
+
+CU_File_Entry :: struct {
+	cu_idx: u32,
+	file_idx: u32,
 }
 
 COLOR_CHOICES :: 16
@@ -261,6 +267,7 @@ Trace :: struct {
 	global_instants: [dynamic]Instant,
 
 	filename_map: strings.Intern,
+	cu_file_map: map[CU_File_Entry]string,
 	line_info: [dynamic]Line_Info,
 
 	total_max_time: i64,
