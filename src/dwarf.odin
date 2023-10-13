@@ -75,8 +75,9 @@ Dw_LNS :: enum u8 {
 }
 
 Dw_Line :: enum u8 {
-	end_sequence = 0x1,
-	set_address = 0x2,
+	end_sequence      = 0x1,
+	set_address       = 0x2,
+	set_discriminator = 0x4,
 }
 
 DWARF32_V5_Line_Header :: struct #packed {
@@ -288,6 +289,7 @@ load_dwarf :: proc(trace: ^Trace, line_buffer, line_str_buffer, abbrev_buffer, i
 	cu_list := make([dynamic]CU_Unit)
 
 	pass := 1
+	version : u16 = 0
 	for i := 0; i < len(line_buffer); pass += 1 {
 		fmt.printf("pass %v\n", pass)
 
@@ -302,7 +304,7 @@ load_dwarf :: proc(trace: ^Trace, line_buffer, line_str_buffer, abbrev_buffer, i
 
 		if unit_length == 0 { continue }
 
-		version := slice_to_type(line_buffer[i:], u16) or_return
+		version = slice_to_type(line_buffer[i:], u16) or_return
 		if !(version == 3 || version == 4 || version == 5) {
 			fmt.printf("Only supports DWARF 3, 4 and 5, got %d\n", version)
 			return false
@@ -560,9 +562,14 @@ load_dwarf :: proc(trace: ^Trace, line_buffer, line_str_buffer, abbrev_buffer, i
 					} case .set_address: {
 						address := slice_to_type(line_table.op_buffer[i:], u64)
 						lm_state.address = address
+						lm_state.op_idx = 0
 						i += size_of(address)
+					} case .set_discriminator: {
+						discr, size := read_uleb(line_table.op_buffer[i:]) or_return
+						lm_state.discriminator = u32(discr)
+						i += size_of(size)
 					} case: {
-						fmt.printf("Unsupport op: %v\n", real_op)
+						return false
 					}
 				}
 
