@@ -115,7 +115,7 @@ Dw_At :: enum {
 	const_val          = 0x1c,
 	containing_type    = 0x1d,
 	default_type       = 0x1e,
-	inlne              = 0x20,
+	inline              = 0x20,
 	is_optional        = 0x21,
 	lower_bound        = 0x22,
 	producer           = 0x25,
@@ -177,14 +177,54 @@ Dw_At :: enum {
 	explicit           = 0x63,
 	object_pointer     = 0x64,
 	endianity          = 0x65,
+	main_subprogram    = 0x6a,
+	data_bit_offset    = 0x6b,
+	const_expr         = 0x6c,
+	enum_class         = 0x6d,
 	linkage_name       = 0x6e,
 
 	// DWARF 5
+	string_length_bit_size  = 0x6f,
+	string_length_byte_size = 0x70,
+	rank               = 0x71,
+	str_offsets_base   = 0x72,
+	addr_base          = 0x73,
+	rnglists_base      = 0x74,
+
+	dwo_name           = 0x76,
+	reference          = 0x77,
+	rvalue_reference   = 0x78,
+	macros             = 0x79,
+
+	call_all_calls        = 0x7a,
+	call_all_source_calls = 0x7b,
+	call_all_tail_calls   = 0x7c,
+	call_return_pc        = 0x7d,
+	call_value            = 0x7e,
+	call_origin           = 0x7f,
+	call_parameter        = 0x80,
+	call_pc               = 0x81,
+	call_tail_call        = 0x82,
+	call_target           = 0x83,
+	call_target_clobbered = 0x84,
+	call_data_location    = 0x85,
+	call_data_value       = 0x86,
+
 	noreturn           = 0x87,
 	alignment          = 0x88,
 
+	export_symbols     = 0x89,
+	deleted            = 0x8a,
+	defaulted          = 0x8b,
+	loclists_base      = 0x8c,
+
 	// GNU extensions
+	GNU_template_name  = 0x2110,
 	GNU_pubnames       = 0x2134,
+
+	GNU_discriminator  = 0x2136,
+	GNU_locviews       = 0x2137,
+	GNU_entry_view     = 0x2138,
 }
 
 Dw_Tag :: enum {
@@ -225,8 +265,24 @@ Dw_Tag :: enum {
 	file_type          = 0x29,
 	friend             = 0x2a,
 	subprogram         = 0x2e,
+	upper_bound        = 0x2f,
+	template_value_parameter = 0x30,
 	variable           = 0x34,
+	volatile_type      = 0x35,
+	dwarf_procedure    = 0x36,
+	restrict_type      = 0x37,
+	decl_column        = 0x39,
+	imported_module    = 0x3a,
+	unspecified_type   = 0x3b,
+	rvalue_reference_type = 0x42,
+	static_link        = 0x48,
+	type               = 0x49,
 	program            = 0xff,
+
+	// GNU extensions
+	GNU_template_parameter_parameter = 0x4106,
+	GNU_template_parameter_pack      = 0x4107,
+	GNU_formal_parameter_pack        = 0x4108,
 }
 
 DWARF32_V5_Line_Header :: struct #packed {
@@ -493,12 +549,20 @@ parse_cu_header :: proc(ctx: ^DWARF_Context, blob: []u8) -> (DWARF_CU_Header, in
 	}
 }
 
-parse_attr_data :: proc(form: Dw_Form, data: []u8, str_buffer: []u8, str_offsets_buffer: []u8) -> (entry: Attr_Data, size: int, ok: bool) {
-	fmt.printf("parsing %v\n", form)
+parse_attr_data :: proc(form: Dw_Form, data, abbrev_buffer, str_buffer, str_offsets_buffer, line_str_buffer: []u8) -> (entry: Attr_Data, size: int, ok: bool) {
 	#partial switch form {
+	case Dw_Form.str:
+		str := strings.clone_from_cstring(cstring(raw_data(data)))
+
+		return Attr_Data(str), len(str)+1, true
 	case Dw_Form.strp:
 		str_off := slice_to_type(data, u32) or_return
 		str := strings.clone_from_cstring(cstring(raw_data(str_buffer[str_off:])))
+
+		return Attr_Data(str), size_of(str_off), true
+	case Dw_Form.line_strp:
+		str_off := slice_to_type(data, u32) or_return
+		str := strings.clone_from_cstring(cstring(raw_data(line_str_buffer[str_off:])))
 
 		return Attr_Data(str), size_of(str_off), true
 	case Dw_Form.strx1:
@@ -506,7 +570,6 @@ parse_attr_data :: proc(form: Dw_Form, data: []u8, str_buffer: []u8, str_offsets
 		str_off_off := str_off_idx * size_of(u32)
 		str_off := slice_to_type(str_offsets_buffer[str_off_off:], u32) or_return
 		str := strings.clone_from_cstring(cstring(raw_data(str_buffer[str_off:])))
-		fmt.printf("%s\n", str)
 
 		return Attr_Data(str), size_of(str_off_off), true
 	case Dw_Form.strx2:
@@ -514,9 +577,12 @@ parse_attr_data :: proc(form: Dw_Form, data: []u8, str_buffer: []u8, str_offsets
 		str_off_off := str_off_idx * size_of(u32)
 		str_off := slice_to_type(str_offsets_buffer[str_off_off:], u32) or_return
 		str := strings.clone_from_cstring(cstring(raw_data(str_buffer[str_off:])))
-		fmt.printf("%s\n", str)
 
 		return Attr_Data(str), size_of(str_off_off), true
+	case Dw_Form.loclistx:
+		val, leb_size := read_uleb(data) or_return
+
+		return Attr_Data(val), leb_size, true
 	case Dw_Form.rnglistx:
 		val, leb_size := read_uleb(data) or_return
 
@@ -524,11 +590,7 @@ parse_attr_data :: proc(form: Dw_Form, data: []u8, str_buffer: []u8, str_offsets
 	case Dw_Form.addrx:
 		val, leb_size := read_uleb(data) or_return
 
-		return Attr_Data(val), size, true
-	case Dw_Form.data2:
-		val := slice_to_type(data, u16) or_return
-
-		return Attr_Data(val), size_of(val), true
+		return Attr_Data(val), leb_size, true
 	case Dw_Form.sec_offset:
 		val := slice_to_type(data, u32) or_return
 
@@ -541,15 +603,33 @@ parse_attr_data :: proc(form: Dw_Form, data: []u8, str_buffer: []u8, str_offsets
 		return Attr_Data(addr), size_of(addr), true
 	case Dw_Form.block1:
 		length := slice_to_type(data, u8) or_return
-		block := slice.clone(data[1:int(length)])
+		block := slice.clone(data[size_of(length):int(length)])
+
+		return Attr_Data(block), size_of(length) + int(length), true
+	case Dw_Form.block2:
+		length := slice_to_type(data, u16) or_return
+		block := slice.clone(data[size_of(length):int(length)])
+
+		return Attr_Data(block), size_of(length) + int(length), true
+	case Dw_Form.block4:
+		length := slice_to_type(data, u32) or_return
+		block := slice.clone(data[size_of(length):int(length)])
 
 		return Attr_Data(block), size_of(length) + int(length), true
 	case Dw_Form.data1:
 		val := slice_to_type(data, u8) or_return
 
 		return Attr_Data(val), size_of(val), true
+	case Dw_Form.data2:
+		val := slice_to_type(data, u16) or_return
+
+		return Attr_Data(val), size_of(val), true
 	case Dw_Form.data4:
 		val := slice_to_type(data, u32) or_return
+
+		return Attr_Data(val), size_of(val), true
+	case Dw_Form.data8:
+		val := slice_to_type(data, u64) or_return
 
 		return Attr_Data(val), size_of(val), true
 	case Dw_Form.udata:
@@ -569,6 +649,9 @@ parse_attr_data :: proc(form: Dw_Form, data: []u8, str_buffer: []u8, str_offsets
 		expr := slice.clone(data[leb_size:leb_size+int(expr_length)])
 
 		return Attr_Data(expr), int(expr_length) + leb_size, true
+	case Dw_Form.implicit_const:
+		constval, leb_size := read_ileb(abbrev_buffer) or_return
+		return Attr_Data(constval), leb_size, true
 	case: panic("TODO Can't handle (%x) %s yet!\n", u64(form), form)
 	}
 
@@ -1044,6 +1127,7 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 		}
 	}
 
+	/*
 	fmt.printf("sorting lines\n")
 	for cu, c_idx in &cu_list {
 		for line in &cu.line_table.lines {
@@ -1059,8 +1143,8 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 		}
 		slice.sort_by(trace.line_info[:], line_order)
 	}
+	*/
 
-	/*
 	// chunk through all abbreviations
 	cu_start := 0
 	cu_idx := 0
@@ -1124,9 +1208,19 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 			if attr_name == 0 && attr_form == 0 {
 				break
 			}
+
+			// implicit const is stored in the attribute. Oh boy.
+			if Dw_Form(attr_form) == .implicit_const {
+				_, size, ok := read_ileb(sections.abbrev[i:])
+				if !ok {
+					panic("%s\n", #location())
+				}
+				i += size
+			}
 		}
 
 		entry.attrs_buf = sections.abbrev[attrs_start:i]
+
 		cu_au_list[cu_idx][entry.id] = len(abbrevs)
 		append(&abbrevs, entry)
 	}
@@ -1148,10 +1242,8 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 	cur_block_id  := 1
 
 	// Process the CUs using the abbrev data
-	pass := 0
 	fmt.printf("DWARF: parsing debug_info\n")
 	for i := 0; i < len(sections.info); {
-		fmt.printf("Starting pass %d\n", pass)
 
 		unit_length, ok := slice_to_type(sections.info[i:], u32)
 		if !ok {
@@ -1208,6 +1300,7 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 
 			abbrev_idx, ok2 := cu_au_list[cur_cu_idx][abbrev_id]
 			if !ok2 {
+				fmt.printf("tried to get %v, %v\n", cur_cu_idx, abbrev_id)
 				panic("%s\n", #location())
 			}
 			au := &abbrevs[abbrev_idx]
@@ -1218,6 +1311,7 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 			block.parent_idx = entry_stack[child_level - 1]
 			block.au_offset = i - size
 			block.cu_offset = cur_cu_offset
+			//fmt.printf("%d | %v\n", abbrev_id, block.type)
 
 			au_offset_lookup[u32(block.au_offset)] = cur_block_id
 
@@ -1238,12 +1332,24 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 					break
 				}
 
-				data, skip_size, ok3 := parse_attr_data(Dw_Form(attr_form), sections.info[i:], sections.debug_str, sections.str_offsets)
+				attr_code := Dw_Form(attr_form)
+				data, skip_size, ok3 := parse_attr_data(attr_code, sections.info[i:], au.attrs_buf[j:], sections.debug_str, debug_str_offsets, sections.line_str)
 				if !ok3 {
+					fmt.printf("failed to parse %v\n", attr_code)
 					panic("%s\n", #location())
 				}
-				block.attrs[Dw_At(attr_name)] = Attr_Entry{form = Dw_Form(attr_form), data = data}
-				i += skip_size
+
+				attr_field := Dw_At(attr_name)
+				attr_val := Attr_Entry{form = Dw_Form(attr_form), data = data}
+				//fmt.printf("\t%v (%v)\n", attr_field, attr_val)
+				block.attrs[attr_field] = attr_val
+
+				// implicit const lives in the attr buffer, rather than in the .debug_info
+				if attr_code == .implicit_const {
+					j += skip_size
+				} else {
+					i += skip_size
+				}
 			}
 			append(&blocks, block)
 
@@ -1266,9 +1372,6 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 		cur_cu_idx += 1
 		cur_cu_offset = 1
 	}
-
-	fmt.printf("%#v\n", blocks)
-	*/
 
 	return true
 }
