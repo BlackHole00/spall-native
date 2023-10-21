@@ -1276,7 +1276,7 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 			return false
 		}
 
-		fmt.printf("0x%x, %v, %v\n", unit_length, version, cu_hdr)
+		//fmt.printf("0x%x, %v, %v\n", unit_length, version, cu_hdr)
 
 		child_level := 1
 		first_entry := true
@@ -1309,7 +1309,7 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 			block.parent_idx = entry_stack[child_level - 1]
 			block.au_offset = i - size
 			block.cu_offset = cur_cu_offset
-			fmt.printf("%x | %d | %v\n", block.au_offset, abbrev_id, block.type)
+			//fmt.printf("%x | %d | %v\n", block.au_offset, abbrev_id, block.type)
 
 			for j := 0; j < len(au.attrs_buf); {
 				attr_name, size, ok := read_uleb(au.attrs_buf[j:])
@@ -1337,7 +1337,7 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 
 				attr_field := Dw_At(attr_name)
 				attr_val := Attr_Entry{form = Dw_Form(attr_form), data = data}
-				fmt.printf("\t%v (%v)\n", attr_field, attr_val)
+				//fmt.printf("\t%v (%v)\n", attr_field, attr_val)
 				block.attrs[attr_field] = attr_val
 
 				// implicit const lives in the attr buffer, rather than in the .debug_info
