@@ -1118,7 +1118,6 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 		}
 	}
 
-	/*
 	fmt.printf("sorting lines\n")
 	for cu, c_idx in &cu_list {
 		for line in &cu.line_table.lines {
@@ -1134,7 +1133,6 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 		}
 		slice.sort_by(trace.line_info[:], line_order)
 	}
-	*/
 
 	// chunk through all abbreviations
 	cu_start := 0
@@ -1321,8 +1319,6 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 			if au.has_children {
 				child_level += 1
 			}
-
-			cur_block_id += 1
 		}
 
 		cur_cu_idx += 1
