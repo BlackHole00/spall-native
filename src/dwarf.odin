@@ -424,20 +424,6 @@ Abbrev_Unit :: struct {
 	attrs_buf: []u8,
 }
 
-Block :: struct {
-	id: int,
-	type: Dw_Tag,
-	attrs: map[Dw_At]Attr_Entry,
-
-	type_idx: int,
-	abstract_idx: int,
-
-	parent_idx: int,
-	au_offset: int,
-	cu_offset: int,
-	children: [dynamic]int,
-}
-
 Sections :: struct {
 	debug_str:   []u8,
 	str_offsets: []u8,
@@ -608,17 +594,17 @@ parse_attr_data :: proc(form: Dw_Form, data, abbrev_buffer, str_buffer, str_offs
 		return Attr_Data(addr), size_of(addr), true
 	case Dw_Form.block1:
 		length := slice_to_type(data, u8) or_return
-		block := slice.clone(data[size_of(length):int(length)])
+		block := data[size_of(length):int(length)]
 
 		return Attr_Data(block), size_of(length) + int(length), true
 	case Dw_Form.block2:
 		length := slice_to_type(data, u16) or_return
-		block := slice.clone(data[size_of(length):int(length)])
+		block := data[size_of(length):int(length)]
 
 		return Attr_Data(block), size_of(length) + int(length), true
 	case Dw_Form.block4:
 		length := slice_to_type(data, u32) or_return
-		block := slice.clone(data[size_of(length):int(length)])
+		block := data[size_of(length):int(length)]
 
 		return Attr_Data(block), size_of(length) + int(length), true
 	case Dw_Form.data1:
@@ -651,7 +637,7 @@ parse_attr_data :: proc(form: Dw_Form, data, abbrev_buffer, str_buffer, str_offs
 		return Attr_Data(val), size_of(val), true
 	case Dw_Form.exprloc:
 		expr_length, leb_size := read_uleb(data) or_return
-		expr := slice.clone(data[leb_size:leb_size+int(expr_length)])
+		expr := data[leb_size:leb_size+int(expr_length)]
 
 		return Attr_Data(expr), int(expr_length) + leb_size, true
 	case Dw_Form.implicit_const:
@@ -1222,19 +1208,9 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 	}
 
 	MAX_BLOCK_STACK :: 30
-	entry_stack := [MAX_BLOCK_STACK]int{}
-
-	blocks := make([dynamic]Block)
-
-	head_block := Block{}
-	head_block.type = Dw_Tag.program
-	head_block.children = make([dynamic]int)
-	append(&blocks, head_block)
-	entry_stack[0] = 0
 
 	cur_cu_idx     := 0
 	cur_cu_offset  := 0
-	cur_block_id  := 1
 
 	// Process the CUs using the abbrev data
 	fmt.printf("DWARF: parsing debug_info\n")
@@ -1303,13 +1279,8 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 			}
 			au := &abbrevs[abbrev_idx]
 
-			block := Block{}
-			block.type = au.type
-			block.id = cur_block_id
-			block.parent_idx = entry_stack[child_level - 1]
-			block.au_offset = i - size
-			block.cu_offset = cur_cu_offset
-			//fmt.printf("%x | %d | %v\n", block.au_offset, abbrev_id, block.type)
+			au_offset := i - size
+			//fmt.printf("%x | %d | %v\n", au_offset, abbrev_id, au.type)
 
 			for j := 0; j < len(au.attrs_buf); {
 				attr_name, size, ok := read_uleb(au.attrs_buf[j:])
@@ -1338,7 +1309,6 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 				attr_field := Dw_At(attr_name)
 				attr_val := Attr_Entry{form = Dw_Form(attr_form), data = data}
 				//fmt.printf("\t%v (%v)\n", attr_field, attr_val)
-				block.attrs[attr_field] = attr_val
 
 				// implicit const lives in the attr buffer, rather than in the .debug_info
 				if attr_code == .implicit_const {
@@ -1347,18 +1317,8 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 					i += skip_size
 				}
 			}
-			append(&blocks, block)
-
-			parent_idx := entry_stack[child_level - 1]
-			append(&blocks[parent_idx].children, cur_block_id)
-			entry_stack[child_level] = cur_block_id
 
 			if au.has_children {
-				if child_level + 1 >= len(entry_stack) {
-					fmt.printf("Failed to parse, got an invalid DWARF CU AST!\n")
-					return false
-				}
-
 				child_level += 1
 			}
 
