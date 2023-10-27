@@ -635,6 +635,10 @@ parse_attr_data :: proc(form: Dw_Form, data, abbrev_buffer, str_buffer, str_offs
 		val := slice_to_type(data, u32) or_return
 
 		return Attr_Data(val), size_of(val), true
+	case Dw_Form.ref_udata:
+		val, leb_size := read_uleb(data) or_return
+
+		return Attr_Data(val), leb_size, true
 	case Dw_Form.exprloc:
 		expr_length, leb_size := read_uleb(data) or_return
 		expr := data[leb_size:leb_size+int(expr_length)]
