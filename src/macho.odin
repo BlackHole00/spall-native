@@ -94,14 +94,14 @@ load_macho_symbols :: proc(trace: ^Trace, exec_buffer: []u8, skew_size: ^u64) ->
 		if cmd.type == MACH_CMD_SYMTAB {
 			symtab_header = slice_to_type(exec_buffer[read_idx:], Mach_Symtab_Command) or_return
 			break
-		} 
+		}
 
 		read_idx += int(cmd.size)
 	}
 	if read_idx >= len(exec_buffer) {
 		return false
 	}
-	
+
 	symbol_table_size := symtab_header.symbol_count * size_of(Mach_Symbol_Entry_64)
 	if len(exec_buffer) < int(symtab_header.symbol_table_offset + symbol_table_size) ||
 	   len(exec_buffer) < int(symtab_header.string_table_offset + symtab_header.string_table_size) {
@@ -117,6 +117,10 @@ load_macho_symbols :: proc(trace: ^Trace, exec_buffer: []u8, skew_size: ^u64) ->
 		symbol_buffer := exec_buffer[int(symtab_header.symbol_table_offset)+(i * size_of(Mach_Symbol_Entry_64)):]
 		symbol := slice_to_type(symbol_buffer, Mach_Symbol_Entry_64) or_return
 		symbol_name := string(cstring(raw_data(string_table_bytes[symbol.string_table_idx:])))
+
+		if symbol_name == "" {
+			continue
+		}
 
 		demangled_name, ok2 := demangle_symbol(symbol_name, tmp_buffer)
 		if !ok2 {
