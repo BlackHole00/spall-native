@@ -11,10 +11,11 @@
 #define SPALL_IS_CLANG   0
 #define SPALL_IS_CPP     0
 #define SPALL_IS_X64     0
+#define SPALL_IS_ARM64   0
 
 #ifdef __cplusplus
-	#undef SPALL_IS_CPP
-	#define SPALL_IS_CPP 1
+    #undef SPALL_IS_CPP
+    #define SPALL_IS_CPP 1
 #endif
 
 #if defined(__clang__)
@@ -32,12 +33,15 @@
     #define SPALL_IS_LINUX 1
 #endif
 #ifdef __GNUC__
-	#undef SPALL_IS_GCC
-	#define SPALL_IS_GCC 1
+    #undef SPALL_IS_GCC
+    #define SPALL_IS_GCC 1
 #endif
 #if defined(__x86_64__) || defined(_M_AMD64)
-	#undef SPALL_IS_X64
-	#define SPALL_IS_X64 1
+    #undef SPALL_IS_X64
+    #define SPALL_IS_X64 1
+#elif defined(__aarch64__)
+    #undef SPALL_IS_ARM64
+    #define SPALL_IS_ARM64 1
 #endif
 
 #if (!SPALL_IS_CLANG && !SPALL_IS_GCC)
@@ -88,7 +92,7 @@ extern "C" {
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <x86intrin.h>
+
 
 #if !SPALL_IS_WINDOWS
     #include <time.h>
@@ -117,13 +121,32 @@ extern "C" {
 #define __debugbreak() __builtin_trap()
 
 #if SPALL_IS_CPP
-	#define Spall_Atomic(X) std::atomic<X>
+    #define Spall_Atomic(X) std::atomic<X>
 #else
-	#define Spall_Atomic(X) _Atomic (X)
+    #define Spall_Atomic(X) _Atomic (X)
 #endif
 
 #define SPALL_FN static SPALL_NOINSTRUMENT
 #define SPALL_MIN(a, b) (((a) < (b)) ? (a) : (b))
+
+#if SPALL_IS_X64
+#include <x86intrin.h>
+SPALL_FN SPALL_NOINSTRUMENT uint64_t spall_get_clock(void) {
+    return __rdtsc();
+}
+SPALL_FN SPALL_NOINSTRUMENT void spall_pause(void) {
+    _mm_pause();
+}
+#elif SPALL_IS_ARM64
+SPALL_FN SPALL_NOINSTRUMENT uint64_t spall_get_clock(void) {
+    int64_t timer_val;
+    asm volatile("mrs %0, cntvct_el0" : "=r"(timer_val));
+    return (uint64_t)timer_val;
+}
+SPALL_FN SPALL_NOINSTRUMENT void spall_pause(void) {
+    asm volatile("yield");
+}
+#endif
 
 #pragma pack(push, 1)
 
@@ -170,7 +193,7 @@ typedef struct SpallBuffer {
 
     // if true, write to upper-half, else lower-half
     size_t sub_length;
-    bool   write_half; 
+    bool   write_half;
 
     struct {
         Spall_Atomic(bool)     is_running;
@@ -230,7 +253,8 @@ SPALL_FN long perf_event_open(struct perf_event_attr *hw_event, pid_t pid, int c
     return syscall(__NR_perf_event_open, hw_event, pid, cpu, group_fd, flags);
 }
 
-SPALL_FN double get_rdtsc_multiplier(void) {
+#if SPALL_IS_X64
+SPALL_FN double spall_get_clock_multiplier(void) {
     struct perf_event_attr pe = {
         .type = PERF_TYPE_HARDWARE,
         .size = sizeof(struct perf_event_attr),
@@ -259,6 +283,7 @@ SPALL_FN double get_rdtsc_multiplier(void) {
     double multiplier = nanos / 1000000000000000.0;
     return multiplier;
 }
+#endif
 
 
 SPALL_FN SPALL_FORCEINLINE void spall_signal(Spall_Futex *addr) {
@@ -291,13 +316,24 @@ SPALL_FN SPALL_FORCEINLINE void spall_wait(Spall_Futex *addr, uint64_t val) {
 #include <sys/types.h>
 #include <sys/sysctl.h>
 
-SPALL_FN double get_rdtsc_multiplier(void) {
+#if SPALL_IS_X64
+SPALL_FN double spall_get_clock_multiplier(void) {
     uint64_t freq;
     size_t size = sizeof(freq);
 
     sysctlbyname("machdep.tsc.frequency", &freq, &size, NULL, 0);
     return 1000000000.0 / (double)freq;
 }
+#elif SPALL_IS_ARM64
+SPALL_FN double spall_get_clock_multiplier(void) {
+    uint64_t freq_val;
+    asm volatile("mrs %0, cntfrq_el0" : "=r"(freq_val));
+
+    double multiplier = 1000000000.0 / (double)freq_val;
+    printf("%llu, %f\n", freq_val, multiplier);
+    return multiplier;
+}
+#endif
 
 SPALL_FN bool get_program_path(char **out_path) {
     char pre_path[1025];
@@ -323,7 +359,7 @@ SPALL_FN bool get_program_path(char **out_path) {
 #define ULF_NO_ERRNO        0x01000000
 
 /* timeout is specified in microseconds */
-int __ulock_wait(uint32_t operation, void *addr, uint64_t value, uint32_t timeout); 
+int __ulock_wait(uint32_t operation, void *addr, uint64_t value, uint32_t timeout);
 int __ulock_wake(uint32_t operation, void *addr, uint64_t wake_value);
 
 SPALL_FN SPALL_FORCEINLINE void spall_signal(Spall_Futex *addr) {
@@ -376,7 +412,7 @@ SPALL_FN bool get_program_path(char **out_path) {
     return true;
 }
 
-SPALL_FN SPALL_FORCEINLINE double get_rdtsc_multiplier(void) {
+SPALL_FN SPALL_FORCEINLINE double spall_get_clock_multiplier(void) {
 
     // Cache the answer so that multiple calls never take the slow path more than once
     static double multiplier = 0;
@@ -388,13 +424,13 @@ SPALL_FN SPALL_FORCEINLINE double get_rdtsc_multiplier(void) {
 
     // Get time before sleep
     uint64_t qpc_begin = 0; QueryPerformanceCounter((LARGE_INTEGER *)&qpc_begin);
-    uint64_t tsc_begin = __rdtsc();
+    uint64_t tsc_begin = spall_get_clock();
 
     Sleep(2);
 
     // Get time after sleep
     uint64_t qpc_end = qpc_begin + 1; QueryPerformanceCounter((LARGE_INTEGER *)&qpc_end);
-    uint64_t tsc_end = __rdtsc();
+    uint64_t tsc_end = spall_get_clock();
 
     // Do the math to extrapolate the RDTSC ticks elapsed in 1 second
     uint64_t qpc_freq = 0; QueryPerformanceFrequency((LARGE_INTEGER *)&qpc_freq);
@@ -448,7 +484,7 @@ SPALL_FN SPALL_FORCEINLINE bool spall__file_write(void *p, size_t n) {
     spall_buffer->writer.ptr = (uint64_t)p;
     spall_signal(&spall_buffer->writer.ptr);
 
-    while (spall_buffer->writer.ptr != 0) { _mm_pause(); }
+    while (spall_buffer->writer.ptr != 0) { spall_pause(); }
 
     return true;
 }
@@ -488,7 +524,7 @@ SPALL_FN SPALL_FORCEINLINE bool spall_buffer_micro_begin(uint64_t addr, uint64_t
 
     uint64_t mask = ((uint64_t)0xFF) << (8 * 7);
     uint64_t type_b = ((uint64_t)(uint8_t)SpallEventType_MicroBegin) << (8 * 7);
-    uint64_t when = __rdtsc();
+    uint64_t when = spall_get_clock();
     ev->type_when = (~mask & when) | type_b;
     ev->address = addr;
     ev->caller = caller;
@@ -497,7 +533,7 @@ SPALL_FN SPALL_FORCEINLINE bool spall_buffer_micro_begin(uint64_t addr, uint64_t
     return true;
 }
 SPALL_FN SPALL_FORCEINLINE bool spall_buffer_micro_end(void) {
-    uint64_t when = __rdtsc();
+    uint64_t when = spall_get_clock();
 
     size_t ev_size = sizeof(SpallMicroEndEvent);
     if ((spall_buffer->head + ev_size) > spall_buffer->sub_length) {
@@ -554,21 +590,21 @@ void (spall_auto_thread_quit)(void) {
 }
 
 SPALL_FN void *spall_canonical_addr(void* fn) {
-	// sometimes the pointer we get back is to a jump table; walk past that first layer.
+    // sometimes the pointer we get back is to a jump table; walk past that first layer.
 
-	void *ret = fn;
+    void *ret = fn;
 #if SPALL_IS_X64
-	unsigned char *fn_data = (unsigned char *)fn;
-	if (fn_data[0] == 0xE9) {
-		// JMP rel32
-		int32_t target = *(int32_t*) &fn_data[1];
+    unsigned char *fn_data = (unsigned char *)fn;
+    if (fn_data[0] == 0xE9) {
+        // JMP rel32
+        int32_t target = *(int32_t*) &fn_data[1];
 
-		int jump_inst_size = 5;
-		ret = (void *)(fn_data + jump_inst_size + target);
-	}
+        int jump_inst_size = 5;
+        ret = (void *)(fn_data + jump_inst_size + target);
+    }
 #endif
 
-	return ret;
+    return ret;
 }
 
 bool spall_auto_init(char *filename) {
@@ -582,7 +618,7 @@ bool spall_auto_init(char *filename) {
     }
     if (!spall_ctx.file) { return false; }
 
-    spall_ctx.stamp_scale = get_rdtsc_multiplier();
+    spall_ctx.stamp_scale = spall_get_clock_multiplier();
     SpallHeader header = {0};
     header.magic_header = 0xABADF00D;
     header.version = 1;
