@@ -568,3 +568,28 @@ read_ileb :: proc(buffer: []u8) -> (i64, int, bool) {
 
 	return 0, 0, false
 }
+
+continuation_byte :: proc(b: u8) -> bool {
+	return b >= 0x80 && b < 0xC0
+}
+
+step_left_rune :: proc(buffer: []u8, cur: int) -> int {
+	pos := cur
+	if pos > 0 {
+		pos -= 1
+		for pos >= 0 && continuation_byte(buffer[pos]) {
+			pos -= 1
+		}
+	}
+	return pos
+}
+step_right_rune :: proc(buffer: []u8, cur: int) -> int {
+	pos := cur
+	if pos < len(buffer) {
+		pos += 1
+		for pos < len(buffer) && continuation_byte(buffer[pos]) {
+			pos += 1
+		}
+	}
+	return pos
+}

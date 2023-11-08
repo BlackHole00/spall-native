@@ -23,6 +23,9 @@ TextboxState :: struct {
 	focus: bool,
 	cursor: int,
 	b: strings.Builder,
+
+	prev: ^TextboxState,
+	next: ^TextboxState,
 }
 
 TextboxKind :: enum u8 {

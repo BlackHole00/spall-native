@@ -31,7 +31,6 @@ open_file_dialog :: proc() -> (string, bool) {
 	}
 
 	if pid == 0 {
-		fmt.printf("starting zenity!\n")
 		unix.sys_dup2(int(fds[1]), 1)
 		unix.sys_close(int(fds[1]))
 		unix.sys_close(int(fds[0]))

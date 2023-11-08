@@ -6,6 +6,7 @@ import "core:math"
 import "core:runtime"
 import "core:slice"
 import "core:strings"
+import "core:unicode/utf8"
 import "core:os"
 
 import "core:prof/spall"
@@ -2403,7 +2404,7 @@ draw_textbox :: proc(rects: ^[dynamic]DrawRect, pos: Rect, hint_text: string, st
 	if state.focus {
 		b := strings.builder_make(context.temp_allocator)
 		for r, idx in cur_str {
-			if idx == state.cursor {
+			if idx >= state.cursor {
 				break
 			} else {
 				strings.write_rune(&b, r)
@@ -2433,12 +2434,19 @@ draw_main_menu :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UISt
 	program_input_box := &ui_state.textboxes[.ProgramInput]
 	draw_textbox(rects, Rect{line_x, line_y, form_w, form_h}, "Path to Program...", program_input_box)
 
-	edge_pad := 0.5 * em
+	edge_pad := 1 * em
 	button_height := 2 * em
 	button_width  := 2 * em
 	program_select_rect := Rect{line_x + form_w + edge_pad, next_line(&line_y, form_h), button_height, button_width}
 	if button(rects, program_select_rect, "\uf15b", "select program", .IconFont, menu_rect.x, menu_rect.w) {
-		fmt.printf("selecting executable!\n")
+		filename, ok := open_file_dialog()
+		if ok {
+			strings.builder_reset(&program_input_box.b)
+			strings.write_string(&program_input_box.b, filename)
+			cur_str := strings.to_string(program_input_box.b)
+			r_len := utf8.rune_count_in_string(cur_str)
+			program_input_box.cursor = r_len
+		}
 	}
 
 	cmdargs_input_box := &ui_state.textboxes[.CmdArgsInput]

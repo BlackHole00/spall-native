@@ -267,8 +267,15 @@ main :: proc() {
 		post_loading = true,
 		textboxes = make(map[TextboxKind]TextboxState),
 	}
+
 	ui_state.textboxes[.ProgramInput] = init_textbox_state()
 	ui_state.textboxes[.CmdArgsInput] = init_textbox_state()
+	first := &ui_state.textboxes[.ProgramInput]
+	second := &ui_state.textboxes[.CmdArgsInput]
+	first.next = second
+	first.prev = second
+	second.next = first
+	second.prev = first
 
 	// If the user passed us a trace, save off the filename now
 	if len(os.args) == 2 {
@@ -544,28 +551,43 @@ main :: proc() {
 					should_toggle_fullscreen = true
 				case .BACKSPACE:
 					if capture_text {
-						cur_str := strings.to_string(selected_box.b)
-						r_len := utf8.rune_count_in_string(cur_str)
-
-						if selected_box.cursor == r_len {
-							strings.pop_rune(&selected_box.b)
-							selected_box.cursor = max(0, selected_box.cursor - 1)
+						new_cursor := step_left_rune(selected_box.b.buf[:], selected_box.cursor)
+						remove_range(&selected_box.b.buf, new_cursor, selected_box.cursor)
+						selected_box.cursor = new_cursor
+					}
+				case .TAB:
+					if capture_text {
+						selected_box.focus = false
+						if shift_down {
+							selected_box = selected_box.prev
 						} else {
-							if selected_box.cursor > 0 {
-								selected_box.cursor -= 1
-								remove_range(&selected_box.b.buf, selected_box.cursor, selected_box.cursor + 1)
-							}
+							selected_box = selected_box.next
 						}
+						selected_box.focus = true
 					}
 				case .LEFT:
 					if capture_text {
-						selected_box.cursor = max(0, selected_box.cursor - 1)
+						selected_box.cursor = step_left_rune(selected_box.b.buf[:], selected_box.cursor)
 					}
 				case .RIGHT:
 					if capture_text {
+						selected_box.cursor = step_right_rune(selected_box.b.buf[:], selected_box.cursor)
+					}
+				case .UP:
+					if capture_text {
+						selected_box.cursor = 0
+					}
+				case .DOWN:
+					if capture_text {
+						selected_box.cursor = len(selected_box.b.buf)
+					}
+				case .V:
+					if capture_text && ctrl_down {
+						path := get_clipboard()
+						strings.builder_reset(&selected_box.b)
+						strings.write_string(&selected_box.b, path)
 						cur_str := strings.to_string(selected_box.b)
-						r_len := utf8.rune_count_in_string(cur_str)
-						selected_box.cursor = min(r_len, selected_box.cursor + 1)
+						selected_box.cursor = len(cur_str)
 					}
 				}
 			case .KEYUP:

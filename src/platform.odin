@@ -241,3 +241,11 @@ flush_rects :: proc(rects: ^[dynamic]DrawRect) {
 get_system_color :: proc() -> bool { return false }
 get_session_storage :: proc(key: string) { }
 set_session_storage :: proc(key, val: string) { }
+
+get_clipboard :: proc() -> string {
+	return string(SDL.GetClipboardText())
+}
+set_clipboard :: proc(text: string) {
+	cstr_text := strings.clone_to_cstring(text, context.temp_allocator)
+	SDL.SetClipboardText(cstr_text)
+}
