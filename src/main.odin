@@ -33,6 +33,7 @@ is_hovering    := false
 alt_down       := false
 shift_down     := false
 ctrl_down      := false
+super_down     := false
 
 last_mouse_pos := Vec2{}
 mouse_pos      := Vec2{}
@@ -541,6 +542,7 @@ main :: proc() {
 				alt_down   = (event.key.keysym.mod & SDL.KMOD_ALT) != SDL.Keymod{}
 				shift_down = (event.key.keysym.mod & SDL.KMOD_SHIFT) != SDL.Keymod{}
 				ctrl_down  = (event.key.keysym.mod & SDL.KMOD_CTRL) != SDL.Keymod{}
+				super_down = (event.key.keysym.mod & SDL.KMOD_GUI) != SDL.Keymod{}
 
 				#partial switch event.key.keysym.sym {
 				case .RETURN:
@@ -582,18 +584,18 @@ main :: proc() {
 						selected_box.cursor = len(selected_box.b.buf)
 					}
 				case .V:
-					if capture_text && ctrl_down {
+					if capture_text && (ctrl_down || super_down) {
 						path := get_clipboard()
 						strings.builder_reset(&selected_box.b)
 						strings.write_string(&selected_box.b, path)
-						cur_str := strings.to_string(selected_box.b)
-						selected_box.cursor = len(cur_str)
+						selected_box.cursor = len(selected_box.b.buf)
 					}
 				}
 			case .KEYUP:
 				alt_down   = (event.key.keysym.mod & SDL.KMOD_ALT) != SDL.Keymod{}
 				shift_down = (event.key.keysym.mod & SDL.KMOD_SHIFT) != SDL.Keymod{}
 				ctrl_down  = (event.key.keysym.mod & SDL.KMOD_CTRL) != SDL.Keymod{}
+				super_down = (event.key.keysym.mod & SDL.KMOD_GUI) != SDL.Keymod{}
 			case .MOUSEMOTION:
 				x := f64(event.motion.x)
 				y := f64(event.motion.y)
