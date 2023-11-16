@@ -129,13 +129,13 @@ extern "C" {
 #define SPALL_FN static SPALL_NOINSTRUMENT
 #define SPALL_MIN(a, b) (((a) < (b)) ? (a) : (b))
 
-#if SPALL_IS_X86
+#if SPALL_IS_X64
 #include <x86intrin.h>
 SPALL_FN SPALL_NOINSTRUMENT uint64_t spall_get_clock(void) {
     return __rdtsc();
 }
 SPALL_FN SPALL_NOINSTRUMENT void spall_pause(void) {
-    __mm_pause();
+    _mm_pause();
 }
 #elif SPALL_IS_ARM64
 SPALL_FN SPALL_NOINSTRUMENT uint64_t spall_get_clock(void) {
@@ -160,26 +160,83 @@ typedef struct SpallHeader {
 
 enum {
     SpallEventType_Invalid    = 0,
-    SpallEventType_MicroBegin = 1,
-    SpallEventType_MicroEnd   = 2,
+    SpallEventType_MicroBegin_1 = 1,
+    SpallEventType_MicroBegin_2 = 2,
+    SpallEventType_MicroBegin_4 = 3,
+    SpallEventType_MicroBegin_8 = 4,
+    SpallEventType_MicroEnd_1   = 5,
+    SpallEventType_MicroEnd_2   = 6,
+    SpallEventType_MicroEnd_4   = 7,
+    SpallEventType_MicroEnd_8   = 8,
 };
 
-typedef struct SpallMicroBeginEvent {
-    uint64_t type_when;
+typedef struct SpallMicroBeginEvent_1 {
+    uint8_t  type;
+    uint8_t  dt;
     uint64_t address;
     uint64_t caller;
-} SpallMicroBeginEvent;
+} SpallMicroBeginEvent_1;
 
-typedef struct SpallMicroEndEvent {
-    uint64_t type_when;
-} SpallMicroEndEvent;
+typedef struct SpallMicroBeginEvent_2 {
+    uint8_t  type;
+    uint16_t dt;
+    uint64_t address;
+    uint64_t caller;
+} SpallMicroBeginEvent_2;
+
+typedef struct SpallMicroBeginEvent_4 {
+    uint8_t  type;
+    uint32_t dt;
+    uint64_t address;
+    uint64_t caller;
+} SpallMicroBeginEvent_4;
+
+typedef struct SpallMicroBeginEvent_8 {
+    uint8_t  type;
+    uint64_t dt;
+    uint64_t address;
+    uint64_t caller;
+} SpallMicroBeginEvent_8;
+
+
+typedef struct SpallMicroEndEvent_1 {
+    uint8_t  type;
+    uint8_t dt;
+} SpallMicroEndEvent_1;
+
+typedef struct SpallMicroEndEvent_2 {
+    uint8_t  type;
+    uint16_t dt;
+} SpallMicroEndEvent_2;
+
+typedef struct SpallMicroEndEvent_4 {
+    uint8_t  type;
+    uint32_t dt;
+} SpallMicroEndEvent_4;
+
+typedef struct SpallMicroEndEvent_8 {
+    uint8_t  type;
+    uint64_t dt;
+} SpallMicroEndEvent_8;
+
 
 typedef struct SpallBufferHeader {
     uint32_t size;
     uint32_t tid;
+    uint64_t first_ts;
 } SpallBufferHeader;
 
 #pragma pack(pop)
+
+
+SPALL_FN SPALL_FORCEINLINE uint64_t spall_dt_to_idx(uint64_t dt) {
+    uint64_t filled_bytes = 8 - (__builtin_clzll(dt) >> 3);
+    if (filled_bytes <= 1) {
+        return 0;
+    }
+    uint64_t idx = (64 - __builtin_clzll(filled_bytes - 1));
+    return idx;
+}
 
 typedef struct SpallProfile {
     double stamp_scale;
@@ -204,6 +261,8 @@ typedef struct SpallBuffer {
 
     size_t   head;
     uint32_t thread_id;
+    uint64_t previous_ts;
+    uint64_t first_ts;
 } SpallBuffer;
 
 
@@ -330,7 +389,6 @@ SPALL_FN double spall_get_clock_multiplier(void) {
     asm volatile("mrs %0, cntfrq_el0" : "=r"(freq_val));
 
     double multiplier = 1000000000.0 / (double)freq_val;
-    printf("%llu, %f\n", freq_val, multiplier);
     return multiplier;
 }
 #endif
@@ -497,6 +555,7 @@ SPALL_FN SPALL_FORCEINLINE bool spall_buffer_flush(void) {
     SpallBufferHeader *sbp = (SpallBufferHeader *)(spall_buffer->data + data_start);
     if (spall_buffer->head > 0) {
         sbp->size = (uint32_t)(spall_buffer->head - sizeof(SpallBufferHeader));
+        sbp->first_ts = spall_buffer->first_ts;
         if (!spall__file_write(spall_buffer->data + data_start, spall_buffer->head)) return false;
 
         spall_buffer->write_half = !spall_buffer->write_half;
@@ -505,14 +564,17 @@ SPALL_FN SPALL_FORCEINLINE bool spall_buffer_flush(void) {
     data_start = spall_buffer->write_half ? spall_buffer->sub_length : 0;
     sbp = (SpallBufferHeader *)(spall_buffer->data + data_start);
     sbp->size = 0;
+    sbp->first_ts = 0;
     sbp->tid = spall_buffer->thread_id;
 
     spall_buffer->head = sizeof(SpallBufferHeader);
+    spall_buffer->first_ts = 0;
+    spall_buffer->previous_ts = 0;
     return true;
 }
 
 SPALL_FN SPALL_FORCEINLINE bool spall_buffer_micro_begin(uint64_t addr, uint64_t caller) {
-    size_t ev_size = sizeof(SpallMicroBeginEvent);
+    size_t ev_size = sizeof(SpallMicroBeginEvent_8);
     if ((spall_buffer->head + ev_size) > spall_buffer->sub_length) {
         if (!spall_buffer_flush()) {
             return false;
@@ -520,35 +582,102 @@ SPALL_FN SPALL_FORCEINLINE bool spall_buffer_micro_begin(uint64_t addr, uint64_t
     }
 
     size_t data_start = spall_buffer->write_half ? spall_buffer->sub_length : 0;
-    SpallMicroBeginEvent *ev = (SpallMicroBeginEvent *)((spall_buffer->data + data_start) + spall_buffer->head);
+    uint64_t now = spall_get_clock();
+    if (spall_buffer->first_ts == 0) {
+        spall_buffer->first_ts = now;
+        spall_buffer->previous_ts = now;
+    }
 
-    uint64_t mask = ((uint64_t)0xFF) << (8 * 7);
-    uint64_t type_b = ((uint64_t)(uint8_t)SpallEventType_MicroBegin) << (8 * 7);
-    uint64_t when = spall_get_clock();
-    ev->type_when = (~mask & when) | type_b;
-    ev->address = addr;
-    ev->caller = caller;
+    void *ev_buffer = (spall_buffer->data + data_start) + spall_buffer->head;
+    uint64_t dt = now - spall_buffer->previous_ts;
+    uint64_t ev_type_idx = spall_dt_to_idx(dt);
+    switch (ev_type_idx) {
+    case 0: {
+        SpallMicroBeginEvent_1 *ev = (SpallMicroBeginEvent_1 *)ev_buffer;
+        ev->type = SpallEventType_MicroBegin_1;
+        ev->dt = dt;
+        ev->address = addr;
+        ev->caller = caller;
+        ev_size = sizeof(SpallMicroBeginEvent_1);
+    } break;
+    case 1: {
+        SpallMicroBeginEvent_2 *ev = (SpallMicroBeginEvent_2 *)ev_buffer;
+        ev->type = SpallEventType_MicroBegin_2;
+        ev->dt = dt;
+        ev->address = addr;
+        ev->caller = caller;
+        ev_size = sizeof(SpallMicroBeginEvent_2);
+    } break;
+    case 2: {
+        SpallMicroBeginEvent_4 *ev = (SpallMicroBeginEvent_4 *)ev_buffer;
+        ev->type = SpallEventType_MicroBegin_4;
+        ev->dt = dt;
+        ev->address = addr;
+        ev->caller = caller;
+        ev_size = sizeof(SpallMicroBeginEvent_4);
+    } break;
+    case 3: {
+        SpallMicroBeginEvent_8 *ev = (SpallMicroBeginEvent_8 *)ev_buffer;
+        ev->type = SpallEventType_MicroBegin_8;
+        ev->dt = dt;
+        ev->address = addr;
+        ev->caller = caller;
+        ev_size = sizeof(SpallMicroBeginEvent_8);
+    } break;
+    }
 
+    spall_buffer->previous_ts = now;
     spall_buffer->head += ev_size;
     return true;
 }
-SPALL_FN SPALL_FORCEINLINE bool spall_buffer_micro_end(void) {
-    uint64_t when = spall_get_clock();
 
-    size_t ev_size = sizeof(SpallMicroEndEvent);
+SPALL_FN SPALL_FORCEINLINE bool spall_buffer_micro_end(void) {
+    uint64_t now = spall_get_clock();
+
+    size_t ev_size = sizeof(SpallMicroEndEvent_8);
     if ((spall_buffer->head + ev_size) > spall_buffer->sub_length) {
         if (!spall_buffer_flush()) {
             return false;
         }
     }
+    if (spall_buffer->first_ts == 0) {
+        spall_buffer->first_ts = now;
+        spall_buffer->previous_ts = now;
+    }
 
     size_t data_start = spall_buffer->write_half ? spall_buffer->sub_length : 0;
-    SpallMicroEndEvent *ev = (SpallMicroEndEvent *)(((char *)spall_buffer->data + data_start) + spall_buffer->head);
 
-    uint64_t mask = ((uint64_t)0xFF) << (8 * 7);
-    uint64_t type_b = ((uint64_t)(uint8_t)SpallEventType_MicroEnd) << (8 * 7);
-    ev->type_when = (~mask & when) | type_b;
+    void *ev_buffer = (spall_buffer->data + data_start) + spall_buffer->head;
+    uint64_t dt = now - spall_buffer->previous_ts;
+    uint64_t ev_type_idx = spall_dt_to_idx(dt);
+    switch (ev_type_idx) {
+        case 0: {
+                    SpallMicroEndEvent_1 *ev = (SpallMicroEndEvent_1 *)ev_buffer;
+                    ev->type = SpallEventType_MicroEnd_1;
+                    ev->dt = dt;
+                    ev_size = sizeof(SpallMicroEndEvent_1);
+                } break;
+        case 1: {
+                    SpallMicroEndEvent_2 *ev = (SpallMicroEndEvent_2 *)ev_buffer;
+                    ev->type = SpallEventType_MicroEnd_2;
+                    ev->dt = dt;
+                    ev_size = sizeof(SpallMicroEndEvent_2);
+                } break;
+        case 2: {
+                    SpallMicroEndEvent_4 *ev = (SpallMicroEndEvent_4 *)ev_buffer;
+                    ev->type = SpallEventType_MicroEnd_4;
+                    ev->dt = dt;
+                    ev_size = sizeof(SpallMicroEndEvent_4);
+                } break;
+        case 3: {
+                    SpallMicroEndEvent_8 *ev = (SpallMicroEndEvent_8 *)ev_buffer;
+                    ev->type = SpallEventType_MicroEnd_8;
+                    ev->dt = dt;
+                    ev_size = sizeof(SpallMicroEndEvent_8);
+                } break;
+    }
 
+    spall_buffer->previous_ts = now;
     spall_buffer->head += ev_size;
     return true;
 }

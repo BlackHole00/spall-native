@@ -220,6 +220,7 @@ EventType :: enum {
 	Metadata,
 	Sample,
 	Pad_Skip,
+
 	MicroBegin,
 	MicroEnd,
 }

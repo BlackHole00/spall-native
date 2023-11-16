@@ -23,7 +23,7 @@ as_get_next_buffer :: proc(trace: ^Trace, chunk: []u8, buffer_header: ^spall_fmt
 	return .EventRead
 }
 
-as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, thread: ^Thread) -> BinaryState {
+as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, thread: ^Thread, current_time: ^i64) -> BinaryState {
 	p := &trace.parser
 
 	min_sz := i64(size_of(u64))
@@ -32,25 +32,114 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 	}
 
 	data_start := raw_data(chunk[chunk_pos(p):])
-	first_lump := (^u64)(data_start)^
-	type := spall_fmt.Auto_Event_Type(first_lump >> 56)
-	#partial switch type {
-	case .MicroBegin:
-		event_sz := i64(size_of(spall_fmt.MicroBegin_Event))
+	type := spall_fmt.Auto_Event_Type((^u8)(data_start)^)
+
+    event_sz : i64
+    ev : Event
+    #partial switch type {
+	case .MicroBegin_1:
+		event_sz = i64(size_of(spall_fmt.MicroBegin_Event_1))
 		if chunk_pos(p) + event_sz > i64(len(chunk)) {
 			return .PartialRead
 		}
 
-		event := (^spall_fmt.MicroBegin_Event)(data_start)
-		raw_time := (event.time_and_type << 8) >> 8
-
-		ev := Event{
+		event := (^spall_fmt.MicroBegin_Event_1)(data_start)
+        current_time^ = current_time^ + i64(u64(event.dt))
+        //fmt.printf("B1 | dt: %d, time: %d\n", event.dt, current_time^)
+		ev = Event{
 			has_addr = true,
 			id = event.address,
 			duration = -1,
-			timestamp = i64(raw_time),
+			timestamp = current_time^,
+		}
+	case .MicroBegin_2:
+		event_sz = i64(size_of(spall_fmt.MicroBegin_Event_2))
+		if chunk_pos(p) + event_sz > i64(len(chunk)) {
+			return .PartialRead
 		}
 
+		event := (^spall_fmt.MicroBegin_Event_2)(data_start)
+        current_time^ = current_time^ + i64(u64(event.dt))
+        //fmt.printf("B2 | dt: %d, time: %d\n", event.dt, current_time^)
+		ev = Event{
+			has_addr = true,
+			id = event.address,
+			duration = -1,
+			timestamp = current_time^,
+		}
+	case .MicroBegin_4:
+		event_sz = i64(size_of(spall_fmt.MicroBegin_Event_4))
+		if chunk_pos(p) + event_sz > i64(len(chunk)) {
+			return .PartialRead
+		}
+
+		event := (^spall_fmt.MicroBegin_Event_4)(data_start)
+        current_time^ = current_time^ + i64(u64(event.dt))
+        //fmt.printf("B4 | dt: %d, time: %d\n", event.dt, current_time^)
+		ev = Event{
+			has_addr = true,
+			id = event.address,
+			duration = -1,
+			timestamp = current_time^,
+		}
+	case .MicroBegin_8:
+		event_sz = i64(size_of(spall_fmt.MicroBegin_Event_8))
+		if chunk_pos(p) + event_sz > i64(len(chunk)) {
+			return .PartialRead
+		}
+
+		event := (^spall_fmt.MicroBegin_Event_8)(data_start)
+        current_time^ = current_time^ + i64(u64(event.dt))
+        //fmt.printf("B8 | dt: %d, time: %d\n", event.dt, current_time^)
+		ev = Event{
+			has_addr = true,
+			id = event.address,
+			duration = -1,
+			timestamp = current_time^,
+		}
+    case .MicroEnd_1:
+		event_sz = i64(size_of(spall_fmt.MicroEnd_Event_1))
+		if chunk_pos(p) + event_sz > i64(len(chunk)) {
+			return .PartialRead
+		}
+
+		event := (^spall_fmt.MicroEnd_Event_1)(data_start)
+        current_time^ = current_time^ + i64(u64(event.dt))
+        //fmt.printf("E1 | dt: %d, time: %d\n", event.dt, current_time^)
+    case .MicroEnd_2:
+		event_sz = i64(size_of(spall_fmt.MicroEnd_Event_2))
+		if chunk_pos(p) + event_sz > i64(len(chunk)) {
+			return .PartialRead
+		}
+
+		event := (^spall_fmt.MicroEnd_Event_2)(data_start)
+        current_time^ = current_time^ + i64(u64(event.dt))
+        //fmt.printf("E2 | dt: %d, time: %d\n", event.dt, current_time^)
+    case .MicroEnd_4:
+		event_sz = i64(size_of(spall_fmt.MicroEnd_Event_4))
+		if chunk_pos(p) + event_sz > i64(len(chunk)) {
+			return .PartialRead
+		}
+
+		event := (^spall_fmt.MicroEnd_Event_4)(data_start)
+        current_time^ = current_time^ + i64(u64(event.dt))
+        //fmt.printf("E4 | dt: %d, time: %d\n", event.dt, current_time^)
+    case .MicroEnd_8:
+		event_sz = i64(size_of(spall_fmt.MicroEnd_Event_8))
+		if chunk_pos(p) + event_sz > i64(len(chunk)) {
+			return .PartialRead
+		}
+
+		event := (^spall_fmt.MicroEnd_Event_8)(data_start)
+        current_time^ = current_time^ + i64(u64(event.dt))
+        //fmt.printf("E8 | dt: %d, time: %d\n", event.dt, current_time^)
+    }
+
+	#partial switch type {
+	case .MicroBegin_1: fallthrough
+	case .MicroBegin_2: fallthrough
+	case .MicroBegin_4: fallthrough
+	case .MicroBegin_8:
 		if thread.max_time > ev.timestamp {
 			post_error(trace, 
 				"Woah, time-travel? You just had a begin event that started before a previous one; [pid: %d, tid: %d, addr: 0x%x, event: %v, event_count: %d]", 
@@ -82,22 +171,17 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 
 		p.pos += event_sz
 		return .EventRead
-	case .MicroEnd:
-		event_sz := i64(size_of(spall_fmt.MicroEnd_Event))
-		if chunk_pos(p) + event_sz > i64(len(chunk)) {
-			return .PartialRead
-		}
-
-		event := (^spall_fmt.MicroEnd_Event)(data_start)
-		raw_time := (event.time_and_type << 8) >> 8
-
+	case .MicroEnd_1: fallthrough
+	case .MicroEnd_2: fallthrough
+	case .MicroEnd_4: fallthrough
+	case .MicroEnd_8:
 		if thread.bande_q.len > 0 {
 			jev_idx := stack_pop_back(&thread.bande_q)
 			thread.current_depth -= 1
 
 			depth := &thread.depths[thread.current_depth]
 			jev := &depth.events[jev_idx]
-			jev.duration = i64(raw_time) - jev.timestamp
+			jev.duration = current_time^ - jev.timestamp
 			jev.self_time = jev.duration - jev.self_time
 
 			thread.max_time      = max(thread.max_time, jev.timestamp + jev.duration)
@@ -170,8 +254,10 @@ as_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 		thread := &process.threads[thread_idx]
 
 		buffer_end := p.pos + i64(buffer_header.size)
+        current_time := i64(buffer_header.first_ts)
+        //fmt.printf("starting new buffer for tid %d at %d\n", buffer_header.tid, current_time)
 		ev_loop: for p.pos < buffer_end {
-			state := as_parse_next_event(trace, full_chunk, process, thread)
+			state := as_parse_next_event(trace, full_chunk, process, thread, &current_time)
 
 			#partial switch state {
 			case .PartialRead:

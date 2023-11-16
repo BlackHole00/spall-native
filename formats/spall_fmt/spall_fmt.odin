@@ -33,24 +33,62 @@ Manual_Event_Type :: enum u8 {
 
 Auto_Event_Type :: enum u8 {
 	Invalid    = 0,
-	MicroBegin = 1,
-	MicroEnd   = 2,
+	MicroBegin_1 = 1,
+	MicroBegin_2 = 2,
+	MicroBegin_4 = 3,
+	MicroBegin_8 = 4,
+	MicroEnd_1   = 5,
+	MicroEnd_2   = 6,
+	MicroEnd_4   = 7,
+	MicroEnd_8   = 8,
 }
 
 Buffer_Header :: struct #packed {
 	size: u32,
 	tid: u32,
+    first_ts: u64,
 }
 
-// MicroBegin/End type is packed into the high bits of time
-MicroBegin_Event :: struct #packed {
-	time_and_type: u64, 
+MicroBegin_Event_1 :: struct #packed {
+	type: u8, 
+    dt: u8,
+	address: u64,
+	caller: u64,
+}
+MicroBegin_Event_2 :: struct #packed {
+	type: u8, 
+    dt: u16,
+	address: u64,
+	caller: u64,
+}
+MicroBegin_Event_4 :: struct #packed {
+	type: u8, 
+    dt: u32,
+	address: u64,
+	caller: u64,
+}
+MicroBegin_Event_8 :: struct #packed {
+	type: u8, 
+    dt: u64,
 	address: u64,
 	caller: u64,
 }
 
-MicroEnd_Event :: struct #packed {
-	time_and_type: u64,
+MicroEnd_Event_1 :: struct #packed {
+	type: u8,
+    dt: u8,
+}
+MicroEnd_Event_2 :: struct #packed {
+	type: u8,
+    dt: u16,
+}
+MicroEnd_Event_4 :: struct #packed {
+	type: u8,
+    dt: u32,
+}
+MicroEnd_Event_8 :: struct #packed {
+	type: u8,
+    dt: u64,
 }
 
 Begin_Event_V1 :: struct #packed {

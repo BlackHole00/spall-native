@@ -637,7 +637,7 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 
 		free_trace(trace)
 
-		trace^ = Trace{}
+		init_trace(trace)
 		trace.error_storage = error_temp
 		trace.error_message = string(trace.error_storage[:error_str_len])
 		return
