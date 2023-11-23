@@ -24,30 +24,22 @@ as_get_next_buffer :: proc(trace: ^Trace, chunk: []u8, buffer_header: ^spall_fmt
 	return .EventRead
 }
 
-pull_uval :: proc(buffer: []u8, size: int) -> u64 {
+pull_uval :: #force_inline proc(buffer: []u8, size: int) -> u64 {
     switch size {
-    case 1:
-        return u64(intrinsics.unaligned_load((^u8)(raw_data(buffer))))
-    case 2:
-        return u64(intrinsics.unaligned_load((^u16)(raw_data(buffer))))
-    case 4:
-        return u64(intrinsics.unaligned_load((^u32)(raw_data(buffer))))
-    case 8:
-        return u64(intrinsics.unaligned_load((^u64)(raw_data(buffer))))
+    case 1: return u64(((^u8)(raw_data(buffer)))^)
+    case 2: return u64(((^u16)(raw_data(buffer)))^)
+    case 4: return u64(((^u32)(raw_data(buffer)))^)
+    case 8: return u64(((^u64)(raw_data(buffer)))^)
     }
     return 0
 }
 
-pull_ival :: proc(buffer: []u8, size: int) -> i64 {
+pull_ival :: #force_inline proc(buffer: []u8, size: int) -> i64 {
     switch size {
-    case 1:
-        return i64(intrinsics.unaligned_load((^i8)(raw_data(buffer))))
-    case 2:
-        return i64(intrinsics.unaligned_load((^i16)(raw_data(buffer))))
-    case 4:
-        return i64(intrinsics.unaligned_load((^i32)(raw_data(buffer))))
-    case 8:
-        return i64(intrinsics.unaligned_load((^i64)(raw_data(buffer))))
+    case 1: return i64(((^i8)(raw_data(buffer)))^)
+    case 2: return i64(((^i16)(raw_data(buffer)))^)
+    case 4: return i64(((^i32)(raw_data(buffer)))^)
+    case 8: return i64(((^i64)(raw_data(buffer)))^)
     }
     return 0
 }
@@ -81,7 +73,6 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 
             current_time^ = current_time^ + i64(dt)
             current_addr^ = current_addr^ + u64(d_addr)
-            //fmt.printf("addr: %x, delta: %d, size: %d\n", current_addr^, d_addr, addr_size)
             ev := Event{
                 has_addr = true,
                 id = current_addr^,
@@ -128,7 +119,6 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
             }
 
             dt := pull_uval(chunk[chunk_pos(p)+i:], int(dt_size)); i += dt_size
-            //fmt.printf("E | dt: %d\n", dt)
 
             current_time^ = current_time^ + i64(dt)
             if thread.bande_q.len > 0 {
@@ -162,7 +152,6 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 	return .PartialRead
 }
 
-
 as_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 	buffer_header := spall_fmt.Buffer_Header{}
 	p := &trace.parser
@@ -172,6 +161,7 @@ as_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 
 	chunk_buffer := make([]u8, 4 * 1024 * 1024)
 	defer delete(chunk_buffer)
+
 
 	read_size, err := os.read_at(fd, chunk_buffer, 0)
 	if err != 0 {
