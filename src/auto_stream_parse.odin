@@ -6,6 +6,7 @@ import "core:slice"
 import "core:mem"
 import "core:os"
 import "core:math"
+import "core:intrinsics"
 import "formats:spall_fmt"
 
 as_get_next_buffer :: proc(trace: ^Trace, chunk: []u8, buffer_header: ^spall_fmt.Buffer_Header) -> BinaryState {
@@ -23,185 +24,140 @@ as_get_next_buffer :: proc(trace: ^Trace, chunk: []u8, buffer_header: ^spall_fmt
 	return .EventRead
 }
 
-as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, thread: ^Thread, current_time: ^i64) -> BinaryState {
+pull_uval :: proc(buffer: []u8, size: int) -> u64 {
+    switch size {
+    case 1:
+        return u64(intrinsics.unaligned_load((^u8)(raw_data(buffer))))
+    case 2:
+        return u64(intrinsics.unaligned_load((^u16)(raw_data(buffer))))
+    case 4:
+        return u64(intrinsics.unaligned_load((^u32)(raw_data(buffer))))
+    case 8:
+        return u64(intrinsics.unaligned_load((^u64)(raw_data(buffer))))
+    }
+    return 0
+}
+
+pull_ival :: proc(buffer: []u8, size: int) -> i64 {
+    switch size {
+    case 1:
+        return i64(intrinsics.unaligned_load((^i8)(raw_data(buffer))))
+    case 2:
+        return i64(intrinsics.unaligned_load((^i16)(raw_data(buffer))))
+    case 4:
+        return i64(intrinsics.unaligned_load((^i32)(raw_data(buffer))))
+    case 8:
+        return i64(intrinsics.unaligned_load((^i64)(raw_data(buffer))))
+    }
+    return 0
+}
+
+as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, thread: ^Thread, current_time: ^i64, current_addr: ^u64, current_caller: ^u64) -> BinaryState {
 	p := &trace.parser
 
-	min_sz := i64(size_of(u64))
+	min_sz := i64(size_of(u16))
 	if chunk_pos(p) + min_sz > i64(len(chunk)) {
 		return .PartialRead
 	}
 
 	data_start := raw_data(chunk[chunk_pos(p):])
-	type := spall_fmt.Auto_Event_Type((^u8)(data_start)^)
+	type_byte := ((^u8)(data_start)^)
+    type_tag := type_byte >> 6
 
-    event_sz : i64
-    ev : Event
-    #partial switch type {
-	case .MicroBegin_1:
-		event_sz = i64(size_of(spall_fmt.MicroBegin_Event_1))
-		if chunk_pos(p) + event_sz > i64(len(chunk)) {
-			return .PartialRead
-		}
+    i : i64 = 1
+    switch type_tag {
+        case 1: // Begin
+            dt_size     := i64(1 << ((0b00_11_00_00 & type_byte) >> 4))
+            addr_size   := i64(1 << ((0b00_00_11_00 & type_byte) >> 2))
+            caller_size := i64(1 <<  (0b00_00_00_11 & type_byte))
+            event_sz := 1 + dt_size + addr_size + caller_size
+            if chunk_pos(p) + event_sz > i64(len(chunk)) {
+                return .PartialRead
+            }
 
-		event := (^spall_fmt.MicroBegin_Event_1)(data_start)
-        current_time^ = current_time^ + i64(u64(event.dt))
-        //fmt.printf("B1 | dt: %d, time: %d\n", event.dt, current_time^)
-		ev = Event{
-			has_addr = true,
-			id = event.address,
-			duration = -1,
-			timestamp = current_time^,
-		}
-	case .MicroBegin_2:
-		event_sz = i64(size_of(spall_fmt.MicroBegin_Event_2))
-		if chunk_pos(p) + event_sz > i64(len(chunk)) {
-			return .PartialRead
-		}
+            dt       := pull_uval(chunk[chunk_pos(p)+i:], int(dt_size));     i += dt_size
+            d_addr   := pull_ival(chunk[chunk_pos(p)+i:], int(addr_size));   i += addr_size
+            d_caller := pull_ival(chunk[chunk_pos(p)+i:], int(caller_size)); i += caller_size
 
-		event := (^spall_fmt.MicroBegin_Event_2)(data_start)
-        current_time^ = current_time^ + i64(u64(event.dt))
-        //fmt.printf("B2 | dt: %d, time: %d\n", event.dt, current_time^)
-		ev = Event{
-			has_addr = true,
-			id = event.address,
-			duration = -1,
-			timestamp = current_time^,
-		}
-	case .MicroBegin_4:
-		event_sz = i64(size_of(spall_fmt.MicroBegin_Event_4))
-		if chunk_pos(p) + event_sz > i64(len(chunk)) {
-			return .PartialRead
-		}
+            current_time^ = current_time^ + i64(dt)
+            current_addr^ = current_addr^ + u64(d_addr)
+            //fmt.printf("addr: %x, delta: %d, size: %d\n", current_addr^, d_addr, addr_size)
+            ev := Event{
+                has_addr = true,
+                id = current_addr^,
+                duration = -1,
+                timestamp = current_time^,
+            }
 
-		event := (^spall_fmt.MicroBegin_Event_4)(data_start)
-        current_time^ = current_time^ + i64(u64(event.dt))
-        //fmt.printf("B4 | dt: %d, time: %d\n", event.dt, current_time^)
-		ev = Event{
-			has_addr = true,
-			id = event.address,
-			duration = -1,
-			timestamp = current_time^,
-		}
-	case .MicroBegin_8:
-		event_sz = i64(size_of(spall_fmt.MicroBegin_Event_8))
-		if chunk_pos(p) + event_sz > i64(len(chunk)) {
-			return .PartialRead
-		}
+            if thread.max_time > ev.timestamp {
+                post_error(trace, 
+                    "Woah, time-travel? You just had a begin event that started before a previous one; [pid: %d, tid: %d, addr: 0x%x, event: %v, event_count: %d]", 
+                    0, thread.id, ev.id, ev, trace.event_count)
+                return .Failure
+            }
 
-		event := (^spall_fmt.MicroBegin_Event_8)(data_start)
-        current_time^ = current_time^ + i64(u64(event.dt))
-        //fmt.printf("B8 | dt: %d, time: %d\n", event.dt, current_time^)
-		ev = Event{
-			has_addr = true,
-			id = event.address,
-			duration = -1,
-			timestamp = current_time^,
-		}
-    case .MicroEnd_1:
-		event_sz = i64(size_of(spall_fmt.MicroEnd_Event_1))
-		if chunk_pos(p) + event_sz > i64(len(chunk)) {
-			return .PartialRead
-		}
+            process.min_time = min(process.min_time, ev.timestamp)
+            thread.min_time  = min(thread.min_time, ev.timestamp)
+            thread.max_time  = ev.timestamp
 
-		event := (^spall_fmt.MicroEnd_Event_1)(data_start)
-        current_time^ = current_time^ + i64(u64(event.dt))
-        //fmt.printf("E1 | dt: %d, time: %d\n", event.dt, current_time^)
-    case .MicroEnd_2:
-		event_sz = i64(size_of(spall_fmt.MicroEnd_Event_2))
-		if chunk_pos(p) + event_sz > i64(len(chunk)) {
-			return .PartialRead
-		}
+            trace.total_min_time = min(trace.total_min_time, ev.timestamp)
+            trace.total_max_time = max(trace.total_max_time, ev.timestamp)
 
-		event := (^spall_fmt.MicroEnd_Event_2)(data_start)
-        current_time^ = current_time^ + i64(u64(event.dt))
-        //fmt.printf("E2 | dt: %d, time: %d\n", event.dt, current_time^)
-    case .MicroEnd_4:
-		event_sz = i64(size_of(spall_fmt.MicroEnd_Event_4))
-		if chunk_pos(p) + event_sz > i64(len(chunk)) {
-			return .PartialRead
-		}
+            if thread.current_depth >= len(thread.depths) {
+                depth := Depth{
+                    events = make([dynamic]Event),
+                }
+                append(&thread.depths, depth)
+            }
 
-		event := (^spall_fmt.MicroEnd_Event_4)(data_start)
-        current_time^ = current_time^ + i64(u64(event.dt))
-        //fmt.printf("E4 | dt: %d, time: %d\n", event.dt, current_time^)
-    case .MicroEnd_8:
-		event_sz = i64(size_of(spall_fmt.MicroEnd_Event_8))
-		if chunk_pos(p) + event_sz > i64(len(chunk)) {
-			return .PartialRead
-		}
+            depth := &thread.depths[thread.current_depth]
+            thread.current_depth += 1
+            append_event(&depth.events, &ev)
 
-		event := (^spall_fmt.MicroEnd_Event_8)(data_start)
-        current_time^ = current_time^ + i64(u64(event.dt))
-        //fmt.printf("E8 | dt: %d, time: %d\n", event.dt, current_time^)
+            ev_idx := len(depth.events)-1
+            stack_push_back(&thread.bande_q, ev_idx)
+            trace.event_count += 1
+
+            p.pos += event_sz
+            return .EventRead
+        case 2: // End
+            dt_size := i64(1 << ((0b00_11_00_00 & type_byte) >> 4))
+            event_sz := 1 + dt_size
+            if chunk_pos(p) + event_sz > i64(len(chunk)) {
+                return .PartialRead
+            }
+
+            dt := pull_uval(chunk[chunk_pos(p)+i:], int(dt_size)); i += dt_size
+            //fmt.printf("E | dt: %d\n", dt)
+
+            current_time^ = current_time^ + i64(dt)
+            if thread.bande_q.len > 0 {
+                jev_idx := stack_pop_back(&thread.bande_q)
+                thread.current_depth -= 1
+
+                depth := &thread.depths[thread.current_depth]
+                jev := &depth.events[jev_idx]
+                jev.duration = current_time^ - jev.timestamp
+                jev.self_time = jev.duration - jev.self_time
+
+                thread.max_time      = max(thread.max_time, jev.timestamp + jev.duration)
+                trace.total_max_time = max(trace.total_max_time, jev.timestamp + jev.duration)
+
+                if thread.bande_q.len > 0 {
+                    parent_depth := &thread.depths[thread.current_depth - 1]
+                    parent_ev_idx := stack_peek_back(&thread.bande_q)
+
+                    pev := &parent_depth.events[parent_ev_idx]
+                    pev.self_time += jev.duration
+                }
+            }
+            
+            p.pos += event_sz
+            return .EventRead
+        case:
+            post_error(trace, "Invalid event type: %d in file!", data_start[0])
+            return .Failure
     }
-
-	#partial switch type {
-	case .MicroBegin_1: fallthrough
-	case .MicroBegin_2: fallthrough
-	case .MicroBegin_4: fallthrough
-	case .MicroBegin_8:
-		if thread.max_time > ev.timestamp {
-			post_error(trace, 
-				"Woah, time-travel? You just had a begin event that started before a previous one; [pid: %d, tid: %d, addr: 0x%x, event: %v, event_count: %d]", 
-				0, thread.id, ev.id, ev, trace.event_count)
-			return .Failure
-		}
-
-		process.min_time = min(process.min_time, ev.timestamp)
-		thread.min_time  = min(thread.min_time, ev.timestamp)
-		thread.max_time  = ev.timestamp
-
-		trace.total_min_time = min(trace.total_min_time, ev.timestamp)
-		trace.total_max_time = max(trace.total_max_time, ev.timestamp)
-
-		if thread.current_depth >= len(thread.depths) {
-			depth := Depth{
-				events = make([dynamic]Event),
-			}
-			append(&thread.depths, depth)
-		}
-
-		depth := &thread.depths[thread.current_depth]
-		thread.current_depth += 1
-		append_event(&depth.events, &ev)
-
-		ev_idx := len(depth.events)-1
-		stack_push_back(&thread.bande_q, ev_idx)
-		trace.event_count += 1
-
-		p.pos += event_sz
-		return .EventRead
-	case .MicroEnd_1: fallthrough
-	case .MicroEnd_2: fallthrough
-	case .MicroEnd_4: fallthrough
-	case .MicroEnd_8:
-		if thread.bande_q.len > 0 {
-			jev_idx := stack_pop_back(&thread.bande_q)
-			thread.current_depth -= 1
-
-			depth := &thread.depths[thread.current_depth]
-			jev := &depth.events[jev_idx]
-			jev.duration = current_time^ - jev.timestamp
-			jev.self_time = jev.duration - jev.self_time
-
-			thread.max_time      = max(thread.max_time, jev.timestamp + jev.duration)
-			trace.total_max_time = max(trace.total_max_time, jev.timestamp + jev.duration)
-
-			if thread.bande_q.len > 0 {
-				parent_depth := &thread.depths[thread.current_depth - 1]
-				parent_ev_idx := stack_peek_back(&thread.bande_q)
-
-				pev := &parent_depth.events[parent_ev_idx]
-				pev.self_time += jev.duration
-			}
-		}
-		
-		p.pos += event_sz
-		return .EventRead
-	case:
-		post_error(trace, "Invalid event type: %d in file!", data_start[0])
-		return .Failure
-	}
 
 	return .PartialRead
 }
@@ -254,10 +210,13 @@ as_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 		thread := &process.threads[thread_idx]
 
 		buffer_end := p.pos + i64(buffer_header.size)
-        current_time := i64(buffer_header.first_ts)
+
+        current_time   := i64(buffer_header.first_ts)
+        current_addr   := u64(0)
+        current_caller := u64(0)
         //fmt.printf("starting new buffer for tid %d at %d\n", buffer_header.tid, current_time)
 		ev_loop: for p.pos < buffer_end {
-			state := as_parse_next_event(trace, full_chunk, process, thread, &current_time)
+			state := as_parse_next_event(trace, full_chunk, process, thread, &current_time, &current_addr, &current_caller)
 
 			#partial switch state {
 			case .PartialRead:
