@@ -76,23 +76,6 @@ int main() {
 	pthread_join(thread_1, NULL);
 	pthread_join(thread_2, NULL);
 
-    // Run a few functions in main
-    for (int i = 0; i < 100; i++) {
-        woz1();
-    }
-    
-    // Ok, toggling instrumenting off globally
-    spall_auto_set_all_instrumenting(false);
-    for (int i = 0; i < 100; i++) {
-        woz2();
-    }
-    spall_auto_set_all_instrumenting(true);
-
-    // Back to instrumenting
-    for (int i = 0; i < 100; i++) {
-        woz3();
-    }
-
 	spall_auto_thread_quit();
 	spall_auto_quit();
 }

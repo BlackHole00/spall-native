@@ -513,14 +513,10 @@ SPALL_FN SPALL_FORCEINLINE void spall_wait(Spall_Futex *addr, uint64_t val) {
 // Auto-tracing impl
 static SpallProfile spall_ctx;
 static _Thread_local SpallBuffer *spall_buffer = NULL;
-static Spall_Atomic(bool) spall_instruments_running = false;
 static _Thread_local bool spall_thread_running = false;
 
 SPALL_NOINSTRUMENT void spall_auto_set_thread_instrumenting(bool on) {
     spall_thread_running = on;
-}
-SPALL_NOINSTRUMENT void spall_auto_set_all_instrumenting(bool on) {
-    atomic_store(&spall_instruments_running, on);
 }
 
 #if SPALL_IS_WINDOWS
@@ -760,7 +756,7 @@ SPALL_FN void *spall_canonical_addr(void* fn) {
 }
 
 
-bool spall_auto_init(char *filename) {
+SPALL_NOINSTRUMENT bool spall_auto_init(char *filename) {
     if (!filename) return false;
     memset(&spall_ctx, 0, sizeof(spall_ctx));
 
@@ -793,18 +789,13 @@ bool spall_auto_init(char *filename) {
     if (write_ret < full_header_size) { return false; }
 
     free(full_header);
-
-    atomic_store(&spall_instruments_running, true);
     return true;
 }
 
-void spall_auto_quit(void) {
-    atomic_store(&spall_instruments_running, false);
-}
+SPALL_NOINSTRUMENT void spall_auto_quit(void) {}
 
 SPALL_NOINSTRUMENT void __cyg_profile_func_enter(void *fn, void *caller) {
-    bool instruments_running = atomic_load(&spall_instruments_running);
-    if (!spall_thread_running || !instruments_running) {
+    if (!spall_thread_running) {
         return;
     }
     fn = spall_canonical_addr(fn);
@@ -815,8 +806,7 @@ SPALL_NOINSTRUMENT void __cyg_profile_func_enter(void *fn, void *caller) {
 }
 
 SPALL_NOINSTRUMENT void __cyg_profile_func_exit(void *fn, void *caller) {
-    bool instruments_running = atomic_load(&spall_instruments_running);
-    if (!spall_thread_running || !instruments_running) {
+    if (!spall_thread_running) {
         return;
     }
 
