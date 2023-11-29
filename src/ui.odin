@@ -1479,28 +1479,34 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState)
 		d_idx := int(trace.stats.selected_event.did)
 		e_idx := int(trace.stats.selected_event.eid)
 
+		edge_pad      := 1 * em
+		button_height := 1 * em
+		button_width  := 1 * em
+		text_x := stats_pane_x + button_width + edge_pad
+
 		thread := trace.processes[p_idx].threads[t_idx]
 		ev := thread.depths[d_idx].events[e_idx]
 		name := ev_name(trace, &ev)
 
-		edge_pad      := 1 * em
-		button_height := 1 * em
-		button_width  := 1 * em
+		rem_width := ui_state.width - text_x
+		trunc_name_str := trunc_string(name, 0, rem_width)
 
 		LineVal :: struct {
 			y: f64,
 			str: string,
 		}
 
-		text_x := stats_pane_x + button_width + edge_pad
 		text_val := LineVal{y, name}
-		draw_text(rects, name, Vec2{text_x, next_line(&y, em)}, .PSize, .MonoFont, text_color)
+		draw_text(rects, trunc_name_str, Vec2{text_x, next_line(&y, em)}, .PSize, .MonoFont, text_color)
 
 		args_val := LineVal{-1, ""}
 		if ev.args > 0 {
 			args_str := in_getstr(&trace.string_block, ev.args)
 			args_val = LineVal{y, args_str}
-			draw_text(rects, fmt.tprintf(" user data: %s", args_str), Vec2{text_x, next_line(&y, em)}, .PSize, .MonoFont, text_color)
+
+			disp_str := fmt.tprintf(" user data: %s", args_str)
+			trunc_disp_str := trunc_string(disp_str, 0, rem_width)
+			draw_text(rects, disp_str, Vec2{text_x, next_line(&y, em)}, .PSize, .MonoFont, text_color)
 		}
 
 		loc_val := LineVal{-1, ""}
