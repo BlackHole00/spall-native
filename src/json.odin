@@ -1,5 +1,6 @@
 package main
 
+/*
 import "core:fmt"
 import "core:strings"
 import "core:slice"
@@ -52,7 +53,7 @@ JSONParser :: struct {
 }
 
 
-Node :: struct {
+JSONNode :: struct {
 	id: i64,
 	parent: i64,
 	callFrame: struct {
@@ -68,7 +69,7 @@ Node :: struct {
 ChunkArgs :: struct {
 	data: struct {
 		cpuProfile: struct {
-			nodes:   [dynamic]Node,
+			nodes:   [dynamic]JSONNode,
 			samples: [dynamic]i64,
 		},
 		timeDeltas: [dynamic]i64,
@@ -104,17 +105,6 @@ PS :: enum u8 {
 
 char_class := [256]CharType{}
 
-FieldType :: enum u8 {
-	Invalid = 0,
-	Args,
-	Dur,
-	Name,
-	Pid,
-	Tid,
-	Ts,
-	Ph,
-	S,
-}
 Field :: struct {
 	name: string,
 	type: FieldType,
@@ -1177,3 +1167,4 @@ json_generate_selftimes :: proc(trace: ^Trace) {
 		}
 	}
 }
+*/

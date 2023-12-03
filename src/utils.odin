@@ -593,3 +593,132 @@ step_right_rune :: proc(buffer: []u8, cur: int) -> int {
 	}
 	return pos
 }
+
+squash_table_1 := [?]u8{1, 1, 2, 4, 4, 8, 8, 8, 8}
+squash_table_2 := [?]u8{0, 0, 1, 2, 2, 3, 3, 3, 3}
+delta_to_size :: proc(v: u64) -> int {
+	v := max(1, v)
+	set_bits  := 64 - intrinsics.count_leading_zeros(v)
+	set_bytes := (set_bits + 7) >> 3
+	return int(squash_table_1[set_bytes])
+}
+
+pull_uval :: #force_inline proc(buffer: []u8, size: int) -> u64 {
+    switch size {
+    case 1: return u64(((^u8)(raw_data(buffer)))^)
+    case 2: return u64(((^u16)(raw_data(buffer)))^)
+    case 4: return u64(((^u32)(raw_data(buffer)))^)
+    case 8: return u64(((^u64)(raw_data(buffer)))^)
+    }
+    return 0
+}
+
+// Internal Event Format
+//      1            2               3             4 5           6 7              8 9              10 11          12 13
+// [ has addr | has duration | has self time | [ts dt size] | [id dt size] | [args dt size] | [dur dt size] | [self dt size] ]
+
+pack_begin_event :: proc(buffer: []u8, has_addr: bool, ts_dt, id_dt, args_dt: u64) -> int {
+	ts_dt_size   := delta_to_size(ts_dt)
+	id_dt_size   := delta_to_size(id_dt)
+	args_dt_size := delta_to_size(args_dt)
+
+	ev_tag : u16 = (
+		(u16(has_addr) << 15) | (0 << 14) | (0 << 13) | 
+		(u16(squash_table_2[ts_dt_size])   << 11) | 
+		(u16(squash_table_2[id_dt_size])   <<  9) | 
+		(u16(squash_table_2[args_dt_size]) <<  7) | 0
+	)
+
+	ts_dt   := ts_dt
+	id_dt   := id_dt
+	args_dt := args_dt
+
+	i := 0
+	mem.copy(raw_data(buffer[i:]), &ev_tag,  size_of(u16)); i += size_of(u16)
+	mem.copy(raw_data(buffer[i:]), &ts_dt,   ts_dt_size);   i += ts_dt_size
+	mem.copy(raw_data(buffer[i:]), &id_dt,   id_dt_size);   i += id_dt_size
+	mem.copy(raw_data(buffer[i:]), &args_dt, args_dt_size); i += args_dt_size
+	return i
+}
+
+unpack_event :: proc(buffer: []u8) -> (DtEvent, int) {
+	i := 0
+	type_bytes := pull_uval(buffer[i:], size_of(u16)); i += size_of(u16)
+
+	has_addr      := bool(((0b1000_0000_0000_0000 & type_bytes) >> 15))
+	has_duration  := bool(((0b0100_0000_0000_0000 & type_bytes) >> 14))
+	has_self_time := bool(((0b0010_0000_0000_0000 & type_bytes) >> 13))
+
+	dt_size   := i64(1 << ((0b0001_1000_0000_0000 & type_bytes) >> 11))
+	id_size   := i64(1 << ((0b0000_0110_0000_0000 & type_bytes) >>  9))
+	args_size := i64(1 << ((0b0000_0001_1000_0000 & type_bytes) >>  7))
+
+	d_timestamp := pull_uval(buffer[i:], dt_size);   i += dt_size
+	d_id        := pull_uval(buffer[i:], id_size);   i += id_size
+	d_args      := pull_uval(buffer[i:], args_size); i += args_size
+	d_duration  : i64 = 0
+	d_self_time : i64 = 0
+
+	if has_duration {
+		dur_size   := i64(1 << ((0b0000_0000_0110_0000 & type_bytes) >> 5))
+		d_duration = pull_uval(buffer[i:], dur_size);  i += dur_size
+	}
+
+	if has_self_time {
+		self_size := i64(1 << ((0b0000_0000_0001_1000 & type_bytes) >> 3))
+		d_self_time = pull_uval(buffer[i:], self_size); i += self_size
+	}
+
+	ev := DtEvent {
+		has_addr = has_addr,
+		has_duration = has_duration,
+		has_self_time = has_self_time,
+		d_id          = d_id,
+		d_args        = d_args,
+		d_timestamp   = d_timestamp,
+		d_duration    = d_duration,
+		d_self_time   = d_self_time,
+	}
+
+	return ev, i
+}
+
+update_ev_self_time :: proc(buffer: []u8, duration: i64) {
+	type_bytes := pull_uval(buffer, size_of(u16))
+}
+
+pack_end_event :: proc(buffer: []u8, has_addr: bool, has_dur: bool, has_self_time: bool, ts_dt, id_dt, args_dt, dur_dt, self_dt: u64) -> int {
+	ts_dt_size   := delta_to_size(ts_dt)
+	id_dt_size   := delta_to_size(id_dt)
+	args_dt_size := delta_to_size(args_dt)
+	dur_dt_size  := delta_to_size(dur_dt)
+	self_dt_size := delta_to_size(self_dt)
+
+	ev_tag : u16 = (
+		(u16(has_addr) << 15) | (u16(has_dur) << 14) | (u16(has_self_time) << 13) | 
+		(u16(squash_table_2[ts_dt_size])   << 11) | 
+		(u16(squash_table_2[id_dt_size])   <<  9) | 
+		(u16(squash_table_2[args_dt_size]) <<  7) |
+		(u16(squash_table_2[dur_dt_size])  <<  5) |
+		(u16(squash_table_2[self_dt_size]) <<  3)
+	)
+
+	ts_dt   := ts_dt
+	id_dt   := id_dt
+	args_dt := args_dt
+	dur_dt  := dur_dt
+	self_dt := self_dt
+
+	i := 0
+	mem.copy(raw_data(buffer[i:]), &ev_tag,  size_of(u16)); i += size_of(u16)
+	mem.copy(raw_data(buffer[i:]), &ts_dt,   ts_dt_size);   i += ts_dt_size
+	mem.copy(raw_data(buffer[i:]), &id_dt,   id_dt_size);   i += id_dt_size
+	mem.copy(raw_data(buffer[i:]), &args_dt, args_dt_size); i += args_dt_size
+	if (has_dur) {
+		mem.copy(raw_data(buffer[i:]), &dur_dt,  dur_dt_size);  i += dur_dt_size
+	}
+	if (has_self_time) {
+		mem.copy(raw_data(buffer[i:]), &self_dt, self_dt_size); i += self_dt_size
+	}
+	return i
+}

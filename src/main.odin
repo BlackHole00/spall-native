@@ -88,8 +88,6 @@ fullscreen := false
 
 t               : f64
 multiselect_t   : f64
-greyanim_t      : f32
-greymotion      : f32
 frame_count     : int
 last_frame_count: int
 rect_count      : int
@@ -137,6 +135,7 @@ reset_flamegraph_camera :: proc(trace: ^Trace, ui_state: ^UIState) {
 	cam.target_pan_x = cam.pan.x
 }
 
+/*
 get_event :: proc(trace: ^Trace, ev_id: EventID) -> ^Event {
 	p_idx := ev_id.pid
 	t_idx := ev_id.tid
@@ -145,6 +144,7 @@ get_event :: proc(trace: ^Trace, ev_id: EventID) -> ^Event {
 
 	return &trace.processes[p_idx].threads[t_idx].depths[d_idx].events[e_idx]
 }
+*/
 
 
 load_font :: proc(rw: ^SDL.RWops, size: i32) -> (^SDL_TTF.Font, bool) {

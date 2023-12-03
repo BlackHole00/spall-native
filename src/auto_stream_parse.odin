@@ -24,16 +24,6 @@ as_get_next_buffer :: proc(trace: ^Trace, chunk: []u8, buffer_header: ^spall_fmt
 	return .EventRead
 }
 
-pull_uval :: #force_inline proc(buffer: []u8, size: int) -> u64 {
-    switch size {
-    case 1: return u64(((^u8)(raw_data(buffer)))^)
-    case 2: return u64(((^u16)(raw_data(buffer)))^)
-    case 4: return u64(((^u32)(raw_data(buffer)))^)
-    case 8: return u64(((^u64)(raw_data(buffer)))^)
-    }
-    return 0
-}
-
 as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, thread: ^Thread, current_time: ^i64, current_addr: ^u64, current_caller: ^u64) -> BinaryState {
 	p := &trace.parser
 
@@ -46,7 +36,6 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
     type_byte := ((^u8)(raw_data(data_start))^)
     type_tag := type_byte >> 6
 
-    i : i64 = 1
     switch type_tag {
         case 0: // MicroBegin
             dt_size     := i64(1 << ((0b00_11_00_00 & type_byte) >> 4))
@@ -57,6 +46,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
                 return .PartialRead
             }
 
+			i : i64 = 1
             dt       := pull_uval(chunk[chunk_pos(p)+i:], int(dt_size));     i += dt_size
             d_addr   := pull_uval(chunk[chunk_pos(p)+i:], int(addr_size));   i += addr_size
             d_caller := pull_uval(chunk[chunk_pos(p)+i:], int(caller_size)); i += caller_size
@@ -83,23 +73,23 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 
             if thread.current_depth >= len(thread.depths) {
                 depth := Depth{
-                    events = make([dynamic]Event),
+					nodes  = make([dynamic]LODInternal),
+					leaves = make([dynamic]LODLeaf),
+                    events = make([dynamic]u8),
                 }
                 append(&thread.depths, depth)
             }
 
             depth := &thread.depths[thread.current_depth]
             thread.current_depth += 1
-            ev := add_event(&depth.events)
-            ev^ = Event{
-                has_addr = true,
-                id = id,
-                duration = -1,
-                timestamp = timestamp
-            }
 
-            ev_idx := len(depth.events)-1
-            stack_push_back(&thread.bande_q, ev_idx)
+			ev_off     := len(depth.events)
+			ev_bytes := [size_of(EventMax)]u8{}
+			be_size := pack_begin_event(ev_bytes[:], true, u64(timestamp), id, 0)
+			fmt.printf("B1 | bytes: %x, size: %d\n", ev_bytes, be_size)
+			append_elems(&depth.events, ..ev_bytes[:])
+
+            stack_push_back(&thread.bande_q, ev_off)
             trace.event_count += 1
 
             p.pos += event_sz
@@ -111,27 +101,28 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
                 return .PartialRead
             }
 
+			i : i64 = 1
             dt := pull_uval(chunk[chunk_pos(p)+i:], int(dt_size)); i += dt_size
 
             ts := current_time^ + i64(dt)
             if thread.bande_q.len > 0 {
-                jev_idx := stack_pop_back(&thread.bande_q)
+                jev_off := stack_pop_back(&thread.bande_q)
                 thread.current_depth -= 1
 
                 depth := &thread.depths[thread.current_depth]
-                jev := &depth.events[jev_idx]
+                jev, _ := unpack_event(depth.events[jev_off:])
                 jev.duration = ts - jev.timestamp
                 jev.self_time = jev.duration - jev.self_time
 
-                thread.max_time      = max(thread.max_time, jev.timestamp + jev.duration)
-                trace.total_max_time = max(trace.total_max_time, jev.timestamp + jev.duration)
+				end_time := jev.timestamp + jev.duration
+                thread.max_time      = max(thread.max_time, end_time)
+                trace.total_max_time = max(trace.total_max_time, end_time)
 
                 if thread.bande_q.len > 0 {
-                    parent_depth := &thread.depths[thread.current_depth - 1]
-                    parent_ev_idx := stack_peek_back(&thread.bande_q)
+                    parent_depth  := &thread.depths[thread.current_depth - 1]
+                    pev_off := stack_peek_back(&thread.bande_q)
 
-                    pev := &parent_depth.events[parent_ev_idx]
-                    pev.self_time += jev.duration
+					update_ev_self_time(depth.events[pev_off:], jev.duration)
                 }
             }
             
@@ -185,23 +176,23 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 
                 if thread.current_depth >= len(thread.depths) {
                     depth := Depth{
-                        events = make([dynamic]Event),
+						nodes  = make([dynamic]LODInternal),
+						leaves = make([dynamic]LODLeaf),
+						events = make([dynamic]u8),
                     }
                     append(&thread.depths, depth)
                 }
 
                 depth := &thread.depths[thread.current_depth]
                 thread.current_depth += 1
-                ev := add_event(&depth.events)
-                ev^ = Event{
-                    id = id,
-                    args = args,
-                    duration = -1,
-                    timestamp = timestamp
-                }
 
-                ev_idx := len(depth.events)-1
-                stack_push_back(&thread.bande_q, ev_idx)
+				ev_off     := len(depth.events)
+				ev_bytes := [size_of(EventMax)]u8{}
+				be_size := pack_begin_event(ev_bytes[:], true, u64(timestamp), id, 0)
+				fmt.printf("B2 | bytes: %x, size: %d\n", ev_bytes, be_size)
+				append_elems(&depth.events, ..ev_bytes[:])
+
+                stack_push_back(&thread.bande_q, ev_off)
                 trace.event_count += 1
 
                 p.pos += i
@@ -295,8 +286,10 @@ as_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 			}
 		}
 	}
+	os.exit(0)
 
 	// cleanup unfinished events
+	/*
 	for process in &trace.processes {
 		for thread in &process.threads {
 			assert(thread.bande_q.len == thread.current_depth)
@@ -326,6 +319,7 @@ as_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 			}
 		}
 	}
+	*/
 
 	return true
 }

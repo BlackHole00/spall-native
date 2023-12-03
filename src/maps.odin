@@ -203,6 +203,17 @@ in_getstr :: #force_inline proc(v: ^[dynamic]u8, s: u64) -> string {
 }
 
 KM_CAP :: 32
+FieldType :: enum u8 {
+	Invalid = 0,
+	Args,
+	Dur,
+	Name,
+	Pid,
+	Tid,
+	Ts,
+	Ph,
+	S,
+}
 
 // Key mashing
 KeyMap :: struct {

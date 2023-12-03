@@ -523,6 +523,7 @@ draw_debug :: proc(rects: ^[dynamic]DrawRect, ui_state: ^UIState) {
 }
 
 draw_rect_tooltip :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState) {
+	/*
 	when SELF_TRACE {
 		spall.SCOPED_EVENT(&spall_ctx, &spall_buffer, "")
 	}
@@ -608,9 +609,11 @@ draw_rect_tooltip :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^U
 		next_line(&cursor_y, em)
 		draw_text(rects, line_info, Vec2{tooltip_start_x, cursor_y}, .PSize, .DefaultFont, text_color)
 	}
+	*/
 }
 
 draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRect, trace: ^Trace, start_time, end_time: i64, ui_state: ^UIState) {
+	/*
 	when SELF_TRACE {
 		spall.SCOPED_EVENT(&spall_ctx, &spall_buffer, "")
 	}
@@ -939,9 +942,11 @@ draw_flamegraphs :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRe
 			draw_line(rects, Vec2{ui_state.side_pad, full_flamegraph_rect.y}, Vec2{ui_state.side_pad, full_flamegraph_rect.y + flamegraph_toptext_height}, 5, toolbar_color)
 		}
 	}
+	*/
 }
 
 draw_global_activity :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, highlight_start_x, highlight_end_x: f64, ui_state: ^UIState) {
+	/*
 	when SELF_TRACE {
 		spall.SCOPED_EVENT(&spall_ctx, &spall_buffer, "")
 	}
@@ -1048,9 +1053,11 @@ draw_global_activity :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, highlight
 
 	draw_rect(rects, Rect{0, global_activity_rect.y, ui_state.side_pad, global_activity_rect.h}, BVec4{0, 0, 0, 255})
 	draw_rect(rects, Rect{ui_state.width - minimap_rect.w, global_activity_rect.y, minimap_rect.w, global_activity_rect.h}, BVec4{0, 0, 0, 255})
+	*/
 }
 
 draw_minimap :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState) {
+	/*
 	when SELF_TRACE {
 		spall.SCOPED_EVENT(&spall_ctx, &spall_buffer, "")
 	}
@@ -1206,6 +1213,7 @@ draw_minimap :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIStat
 
 	// top-right cover-chunk
 	draw_rect(rects, Rect{minimap_rect.x, full_flamegraph_rect.y, minimap_rect.w + (minimap_pad * 2), flamegraph_toptext_height}, bg_color)
+	*/
 }
 
 draw_topbars :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, start_time, end_time: i64, ui_state: ^UIState) {
@@ -1242,7 +1250,7 @@ draw_topbars :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, start_time, end_t
 		highlight_start_x = high_center - (min_highlight / 2)
 		highlight_end_x = high_center + (min_highlight / 2)
 	}
-	draw_global_activity(rects, trace, highlight_start_x, highlight_end_x, ui_state)
+	//draw_global_activity(rects, trace, highlight_start_x, highlight_end_x, ui_state)
 
 	// global timebar
 	{
@@ -1309,6 +1317,7 @@ draw_topbars :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, start_time, end_t
 INITIAL_ITER :: 500_000
 FULL_ITER    :: 2_000_000
 draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState) {
+	/*
 	when SELF_TRACE {
 		spall.SCOPED_EVENT(&spall_ctx, &spall_buffer, "")
 	}
@@ -1782,6 +1791,7 @@ draw_stats :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState)
 		draw_text(rects, "Shift-click and drag to get stats for multiple rectangles", Vec2{stats_pane_x, prev_line(&y, em)}, .PSize, .DefaultFont, text_color)
 		draw_text(rects, "Click on a rectangle to inspect", Vec2{stats_pane_x, prev_line(&y, em)}, .PSize, .DefaultFont, text_color)
 	}
+	*/
 }
 
 process_multiselect :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, pan_delta: Vec2, dt: f64, ui_state: ^UIState) {
@@ -2095,6 +2105,7 @@ process_inputs :: proc(trace: ^Trace, dt: f64, ui_state: ^UIState) -> (i64, i64,
 }
 
 build_selected_ranges :: proc(trace: ^Trace, ui_state: ^UIState) {
+	/*
 	init_stat_state(&trace.stats, ui_state)
 
 	// build out ranges
@@ -2149,6 +2160,7 @@ build_selected_ranges :: proc(trace: ^Trace, ui_state: ^UIState) {
 			}
 		}
 	}
+	*/
 }
 
 init_stat_state :: proc(stats: ^Stats, ui_state: ^UIState) {
@@ -2169,6 +2181,7 @@ init_stat_state :: proc(stats: ^Stats, ui_state: ^UIState) {
 }
 
 process_stats :: proc(trace: ^Trace, ui_state: ^UIState) {
+	/*
 	when SELF_TRACE {
 		spall.SCOPED_EVENT(&spall_ctx, &spall_buffer, "")
 	}
@@ -2280,6 +2293,7 @@ process_stats :: proc(trace: ^Trace, ui_state: ^UIState) {
 			}
 		}
 	}
+	*/
 }
 
 draw_errorbox :: proc(rects: ^[dynamic]DrawRect, trace: ^Trace, ui_state: ^UIState) {
@@ -2302,6 +2316,7 @@ draw_trace :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRect, tr
 		rect_tooltip_pos = Vec2{}
 		rendered_rect_tooltip = false
 
+		/*
 		if !event_cmp(trace.zoom_event, empty_event) {
 			ev := get_event(trace, trace.zoom_event)
 			thread := trace.processes[trace.zoom_event.pid].threads[trace.zoom_event.tid]
@@ -2310,10 +2325,7 @@ draw_trace :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRect, tr
 			set_flamegraph_camera(trace, ui_state, ev.timestamp, duration)
 			trace.zoom_event = empty_event
 		}
-
-		// update animation timers
-		greyanim_t = f32((t - multiselect_t) * 5)
-		greymotion = ease_in_out(greyanim_t)
+		*/
 
 		if start_trace != "" && !ui_state.loading_config {
 			load_config(global_pool, trace, ui_state)
@@ -2381,9 +2393,9 @@ draw_trace :: proc(rects: ^[dynamic]DrawRect, text_rects: ^[dynamic]TextRect, tr
 		rect_count = 0
 		bucket_count = 0
 
-		draw_flamegraphs(rects, text_rects, trace, start_time, end_time, ui_state)
+		//draw_flamegraphs(rects, text_rects, trace, start_time, end_time, ui_state)
 
-		draw_minimap(rects, trace, ui_state)
+		//draw_minimap(rects, trace, ui_state)
 		draw_topbars(rects, trace, start_time, end_time, ui_state)
 
 		// draw sidelines

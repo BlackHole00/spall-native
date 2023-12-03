@@ -243,13 +243,25 @@ Instant :: struct #packed {
 	id: u64,
 	timestamp: i64,
 }
-Event :: struct #packed {
-	has_addr: b8,
+EventMax :: struct #packed {
+	type: u16,
 	id: u64,
 	args: u64,
 	timestamp: i64,
 	duration: i64,
 	self_time: i64,
+}
+
+DtEvent :: struct {
+	has_addr:     bool,
+	has_duration: bool,
+	has_selftime: bool,
+
+	d_id:        u64,
+	d_args:      u64,
+	d_timestamp: i64,
+	d_duration:  i64,
+	d_self_time: i64,
 }
 
 Stats :: struct {
@@ -314,21 +326,32 @@ Trace :: struct {
 	error_storage: [4096]u8,
 }
 
-BUCKET_SIZE :: 32
-CHUNK_NARY_WIDTH :: 4
-ChunkNode :: struct #packed {
+Node :: struct #packed {
 	start_time: i64,
 	end_time: i64,
 
 	avg_color: FVec3,
 	weight: i64,
 }
+
+CHUNK_NARY_WIDTH :: 4
+LODInternal :: struct #packed {
+	node: Node,
+	child_offsets: [CHUNK_NARY_WIDTH]i64,
+	child_count: u8,
+}
+
+BUCKET_SIZE :: 32
+LODLeaf :: struct #packed {
+	node: Node,
+	first_event_off: i64,
+	event_count: u8,
+}
+
 Depth :: struct {
-	tree: []ChunkNode,
-	events: [dynamic]Event,
-	leaf_count:   int,
-	overhang_len: int,
-	full_leaves: int,
+	nodes:  [dynamic]LODInternal,
+	leaves: [dynamic]LODLeaf,
+	events: [dynamic]u8,
 }
 
 Thread :: struct {
@@ -341,7 +364,6 @@ Thread :: struct {
 
 	in_stats: bool,
 
-	events: [dynamic]Event,
 	depths: [dynamic]Depth,
 	instants: [dynamic]Instant,
 
@@ -389,7 +411,6 @@ init_thread :: proc(thread_id: u32) -> Thread {
 		min_time = max(i64), 
 		id = thread_id,
 		in_stats = true,
-		events = make([dynamic]Event),
 		depths = make([dynamic]Depth),
 		instants = make([dynamic]Instant),
 	}
@@ -398,10 +419,10 @@ init_thread :: proc(thread_id: u32) -> Thread {
 }
 free_thread :: proc(thread: ^Thread) {
 	for depth in thread.depths {
+		delete(depth.nodes)
+		delete(depth.leaves)
 		delete(depth.events)
-		delete(depth.tree)
 	}
-	delete(thread.events)
 	delete(thread.depths)
 	delete(thread.instants)
 }

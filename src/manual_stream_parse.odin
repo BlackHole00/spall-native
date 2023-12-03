@@ -1,5 +1,6 @@
 package main
 
+/*
 import "core:fmt"
 import "core:strings"
 import "core:slice"
@@ -468,3 +469,4 @@ ms_v2_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 
 	return true
 }
+*/
