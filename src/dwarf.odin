@@ -744,7 +744,7 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 			return false
 		}
 
-		append(&cu_list, CU_Unit{
+		non_zero_append(&cu_list, CU_Unit{
 			dir_table = make([dynamic]string),
 			file_table = make([dynamic]File_Unit),
 			line_table = Line_Table{
@@ -810,7 +810,7 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 							}
 
 							cstr_dir_name := cstring(raw_data(sections.line_str[str_idx:]))
-							append(&cu.dir_table, string(cstr_dir_name))
+							non_zero_append(&cu.dir_table, string(cstr_dir_name))
 
 							i += size_of(u32)
 						} case: {
@@ -918,7 +918,7 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 					}
 				}
 
-				append(&cu.file_table, file)
+				non_zero_append(&cu.file_table, file)
 			}
 
 			full_cu_size := unit_length + size_of(unit_length)
@@ -935,8 +935,8 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 			i += rem_size
 
 		} else { // For DWARF 4, 3, 2, etc.
-			append(&cu.dir_table, ".")
-			append(&cu.file_table, File_Unit{})
+			non_zero_append(&cu.dir_table, ".")
+			non_zero_append(&cu.file_table, File_Unit{})
 
 			for {
 				cstr_dir_name := cstring(raw_data(sections.line[i:]))
@@ -946,7 +946,7 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 					break
 				}
 
-				append(&cu.dir_table, string(cstr_dir_name))
+				non_zero_append(&cu.dir_table, string(cstr_dir_name))
 			}
 
 			for {
@@ -975,7 +975,7 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 				}
 				i += size3
 
-				append(&cu.file_table, File_Unit{name = string(cstr_file_name), dir_idx = int(dir_idx)})
+				non_zero_append(&cu.file_table, File_Unit{name = string(cstr_file_name), dir_idx = int(dir_idx)})
 			}
 
 			full_cu_size := unit_length + size_of(unit_length)
@@ -1014,7 +1014,7 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 				lm_state.line_num = u64(int(lm_state.line_num) + line_inc)
 				lm_state.address  = u64(int(lm_state.address) + addr_inc)
 
-				append(&line_table.lines, lm_state)
+				non_zero_append(&line_table.lines, lm_state)
 
 				lm_state.discriminator  = 0
 				lm_state.basic_block    = false
@@ -1034,7 +1034,7 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 				#partial switch real_op {
 					case .end_sequence: {
 						lm_state.end_sequence = true
-						append(&line_table.lines, lm_state)
+						non_zero_append(&line_table.lines, lm_state)
 
 						lm_state = Line_Machine{
 							file_idx = 1,
@@ -1061,7 +1061,7 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 			} else {
 				#partial switch op {
 					case .copy: {
-						append(&line_table.lines, lm_state)
+						non_zero_append(&line_table.lines, lm_state)
 
 						lm_state.discriminator  = 0
 						lm_state.basic_block    = false
@@ -1157,7 +1157,7 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 			if !ok {
 				name = ""
 			}
-			append(&trace.line_info, Line_Info{line.address + skew_size, line.line_num, name})
+			non_zero_append(&trace.line_info, Line_Info{line.address + skew_size, line.line_num, name})
 		}
 
 	}
@@ -1236,7 +1236,7 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections, skew_size: u64) -> bool {
 		}
 
 		entry.attrs_buf = sections.abbrev[attrs_start:i]
-		append(abbrevs, entry)
+		non_zero_append(abbrevs, entry)
 	}
 
 	MAX_BLOCK_STACK :: 30

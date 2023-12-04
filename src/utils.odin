@@ -7,6 +7,8 @@ import "core:math"
 import "core:fmt"
 import "core:c"
 import "core:strings"
+import "core:runtime"
+import "core:os"
 
 trap :: proc() -> ! {
 	intrinsics.trap()
@@ -594,13 +596,18 @@ step_right_rune :: proc(buffer: []u8, cur: int) -> int {
 	return pos
 }
 
-squash_table_1 := [?]u8{1, 1, 2, 4, 4, 8, 8, 8, 8}
-squash_table_2 := [?]u8{0, 0, 1, 2, 2, 3, 3, 3, 3}
+squash_table_1 := [9]u8{1, 1, 2, 4, 4, 8, 8, 8, 8}
 delta_to_size :: proc(v: u64) -> int {
 	v := max(1, v)
 	set_bits  := 64 - intrinsics.count_leading_zeros(v)
 	set_bytes := (set_bits + 7) >> 3
+
 	return int(squash_table_1[set_bytes])
+}
+
+squash_table_2 := [9]u8{0, 0, 1, 2, 2, 3, 3, 3, 3}
+size_to_bits :: #force_inline proc(size: int) -> u16 {
+	return u16(squash_table_2[size])
 }
 
 pull_uval :: #force_inline proc(buffer: []u8, size: int) -> u64 {
@@ -624,9 +631,9 @@ pack_begin_event :: proc(buffer: []u8, has_addr: bool, ts_dt, id_dt, args_dt: u6
 
 	ev_tag : u16 = (
 		(u16(has_addr) << 15) | (0 << 14) | (0 << 13) | 
-		(u16(squash_table_2[ts_dt_size])   << 11) | 
-		(u16(squash_table_2[id_dt_size])   <<  9) | 
-		(u16(squash_table_2[args_dt_size]) <<  7) | 0
+		size_to_bits(ts_dt_size)   << 11 | 
+		size_to_bits(id_dt_size)   <<  9 | 
+		size_to_bits(args_dt_size) <<  7 | 0
 	)
 
 	ts_dt   := ts_dt
@@ -641,16 +648,25 @@ pack_begin_event :: proc(buffer: []u8, has_addr: bool, ts_dt, id_dt, args_dt: u6
 	return i
 }
 
+bump_arr_cap :: proc(array: ^[dynamic]u8, bump: int, loc := #caller_location) {
+	if cap(array) < (len(array) + bump) {
+		cap := 2 * cap(array) + max(8, bump)
+
+		// do not 'or_return' here as it could be a partial success
+		non_zero_reserve(array, cap, loc)
+	}
+	a := (^runtime.Raw_Dynamic_Array)(array)
+	a.len += bump
+	return
+}
+
 add_event :: proc(depth: ^Depth, has_addr: bool, ts: i64, id, args: u64) {
 	dt_ts   := ts   - depth.last_ts
 	dt_id   := id   ~ depth.last_id
 	dt_args := args ~ depth.last_args
 
-	ev_bytes := [size_of(EventMax)]u8{}
-	append_elems(&depth.events, ..ev_bytes[:])
-
-	ev_size := pack_begin_event(ev_bytes[:], has_addr, u64(dt_ts), dt_id, dt_args)
-	mem.copy(raw_data(depth.events[depth.event_cursor:]), raw_data(ev_bytes[:]), ev_size)
+	bump_arr_cap(&depth.events, size_of(EventMax))
+	pack_begin_event(depth.events[depth.event_cursor:], has_addr, u64(dt_ts), dt_id, dt_args)
 
 	depth.last_ts   = ts
 	depth.last_id   = id
@@ -682,8 +698,8 @@ update_event :: proc(depth: ^Depth, end_ts: i64) -> i64 {
 		(u16(ts_dt_sz   << 11)) | 
 		(u16(id_dt_sz   <<  9)) | 
 		(u16(args_dt_sz <<  7)) |
-		(u16(squash_table_2[dur_dt_size])  <<  5) |
-		(u16(squash_table_2[self_dt_size]) <<  3)
+		size_to_bits(dur_dt_size)  <<  5 |
+		size_to_bits(self_dt_size) <<  3
 	)
 
 	dt_size   := 1 << ts_dt_sz

@@ -286,7 +286,7 @@ main :: proc() {
 	}
 
 	//thread_count := max(os.processor_core_count() - 1, 1)
-	thread_count := 0
+	thread_count := 1
 	pool_init(&global_pool, thread_count)
 
 	trace := new(Trace)

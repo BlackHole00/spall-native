@@ -77,7 +77,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 					leaves = make([dynamic]LODLeaf),
                     events = make([dynamic]u8),
                 }
-                append(&thread.depths, depth)
+                non_zero_append(&thread.depths, depth)
             }
 
             depth := &thread.depths[thread.current_depth]
@@ -139,7 +139,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 						leaves = make([dynamic]LODLeaf),
 						events = make([dynamic]u8),
                     }
-                    append(&thread.depths, depth)
+                    non_zero_append(&thread.depths, depth)
                 }
 
                 depth := &thread.depths[thread.current_depth]

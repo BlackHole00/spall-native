@@ -36,7 +36,7 @@ get_chunk :: proc(p: ^Parser, fd: os.Handle, chunk_buffer: []u8) -> (int, bool) 
 setup_pid :: proc(trace: ^Trace, process_id: u32) -> int {
 	p_idx, ok := vh_find(&trace.process_map, process_id)
 	if !ok {
-		append(&trace.processes, init_process(process_id))
+		non_zero_append(&trace.processes, init_process(process_id))
 
 		p_idx = len(trace.processes) - 1
 		vh_insert(&trace.process_map, process_id, p_idx)
@@ -50,7 +50,7 @@ setup_tid :: proc(trace: ^Trace, p_idx: int, thread_id: u32) -> int {
 	if !ok {
 		threads := &trace.processes[p_idx].threads
 		thread_map := &trace.processes[p_idx].thread_map
-		append(threads, init_thread(thread_id))
+		non_zero_append(threads, init_thread(thread_id))
 
 		t_idx = len(threads) - 1
 		vh_insert(thread_map, thread_id, t_idx)
@@ -174,8 +174,8 @@ init_trace_allocs :: proc(trace: ^Trace, file_name: string) {
 	strings.intern_init(&trace.filename_map)
 
 	// deliberately setting the first elem to 0, to simplify string interactions
-	append_elem(&trace.string_block, 0)
-	append_elem(&trace.string_block, 0)
+	non_zero_append_elem(&trace.string_block, 0)
+	non_zero_append_elem(&trace.string_block, 0)
 }
 
 init_trace :: proc(trace: ^Trace) {

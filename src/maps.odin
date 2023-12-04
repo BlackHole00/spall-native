@@ -58,7 +58,7 @@ vh_find :: proc (v: ^ValHash, key: u32) -> (int, bool) {
 }
 
 vh_grow :: proc(v: ^ValHash) {
-	resize(&v.hashes, len(v.hashes) * 2)
+	non_zero_resize(&v.hashes, len(v.hashes) * 2)
 	for i in 0..<len(v.hashes) {
 		v.hashes[i] = -1
 	}
@@ -94,7 +94,7 @@ vh_insert :: proc(v: ^ValHash, key: u32, val: int) {
 		e_idx := v.hashes[idx]
 		if e_idx == -1 {
 			v.hashes[idx] = len(v.entries)
-			append(&v.entries, PTEntry{key, val})
+			non_zero_append(&v.entries, PTEntry{key, val})
 			return
 		} else if v.entries[e_idx].key == key {
 			v.entries[e_idx] = PTEntry{key, val}
@@ -150,7 +150,7 @@ in_reinsert :: proc (v: ^INMap, strings: ^[dynamic]u8, entry: u64, v_idx: int) {
 }
 
 in_grow :: proc(v: ^INMap, strings: ^[dynamic]u8) {
-	resize(&v.hashes, len(v.hashes) * 2)
+	non_zero_resize(&v.hashes, len(v.hashes) * 2)
 	for i in 0..<len(v.hashes) {
 		v.hashes[i] = -1
 	}
@@ -182,10 +182,10 @@ in_get :: proc(v: ^INMap, strings: ^[dynamic]u8, key: string) -> u64 {
 			in_str := str_start
 			key_len := u16(len(key))
 			key_len_bytes := (([^]u8)(&key_len)[:2])
-			append_elem(strings, key_len_bytes[0])
-			append_elem(strings, key_len_bytes[1])
-			append_elem_string(strings, key)
-			append(&v.entries, in_str)
+			non_zero_append_elem(strings, key_len_bytes[0])
+			non_zero_append_elem(strings, key_len_bytes[1])
+			non_zero_append_elem_string(strings, key)
+			non_zero_append(&v.entries, in_str)
 
 			return in_str
 		} else if in_getstr(strings, v.entries[e_idx]) == key {
@@ -321,7 +321,7 @@ sm_reinsert :: proc(v: ^StatMap, entry: StatEntry, v_idx: int) {
 }
 
 sm_grow :: proc(v: ^StatMap) {
-	resize(&v.hashes, len(v.hashes) * 2)
+	non_zero_resize(&v.hashes, len(v.hashes) * 2)
 	for i in 0..<len(v.hashes) {
 		v.hashes[i] = -1
 	}
@@ -364,7 +364,7 @@ sm_insert :: proc(v: ^StatMap, key: StatKey, val: FunctionStats) -> ^FunctionSta
 		if e_idx == -1 {
 			e_idx = len(v.entries)
 			v.hashes[idx] = e_idx
-			append(&v.entries, StatEntry{key, val})
+			non_zero_append(&v.entries, StatEntry{key, val})
 			return &v.entries[e_idx].val
 		} else if v.entries[e_idx].key == key {
 			v.entries[e_idx] = StatEntry{key, val}
@@ -385,8 +385,8 @@ sm_sort :: proc(v: ^StatMap, less: proc(i, j: StatEntry) -> bool) {
 	}
 }
 sm_clear :: proc(v: ^StatMap)  {
-	resize(&v.entries, 0)
-	resize(&v.hashes, 32)
+	non_zero_resize(&v.entries, 0)
+	non_zero_resize(&v.hashes, 32)
 	for i in 0..<len(v.hashes) {
 		v.hashes[i] = -1
 	}
@@ -452,7 +452,7 @@ am_find :: proc (v: ^AMMap, key: u64) -> (u64, bool) {
 }
 
 am_grow :: proc(v: ^AMMap) {
-	resize(&v.hashes, len(v.hashes) * 2)
+	non_zero_resize(&v.hashes, len(v.hashes) * 2)
 	for i in 0..<len(v.hashes) {
 		v.hashes[i] = -1
 	}
@@ -488,7 +488,7 @@ am_insert :: proc(v: ^AMMap, key: u64, val: u64) {
 		e_idx := v.hashes[idx]
 		if e_idx == -1 {
 			v.hashes[idx] = i32(len(v.entries))
-			append(&v.entries, AMEntry{key, val})
+			non_zero_append(&v.entries, AMEntry{key, val})
 			return
 		} else if v.entries[e_idx].key == key {
 			v.entries[e_idx] = AMEntry{key, val}
