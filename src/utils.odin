@@ -642,9 +642,9 @@ pack_begin_event :: proc(buffer: []u8, has_addr: bool, ts_dt, id_dt, args_dt: u6
 
 	i := 0
 	mem.copy(raw_data(buffer[i:]), &ev_tag,  size_of(u16)); i += size_of(u16)
-	mem.copy(raw_data(buffer[i:]), &ts_dt,   ts_dt_size);   i += ts_dt_size
-	mem.copy(raw_data(buffer[i:]), &id_dt,   id_dt_size);   i += id_dt_size
-	mem.copy(raw_data(buffer[i:]), &args_dt, args_dt_size); i += args_dt_size
+	mem.copy(raw_data(buffer[i:]), &ts_dt,   8);   i += ts_dt_size
+	mem.copy(raw_data(buffer[i:]), &id_dt,   8);   i += id_dt_size
+	mem.copy(raw_data(buffer[i:]), &args_dt, 8); i += args_dt_size
 	return i
 }
 
@@ -671,7 +671,6 @@ add_event :: proc(depth: ^Depth, has_addr: bool, ts: i64, id, args: u64) {
 	depth.last_ts   = ts
 	depth.last_id   = id
 	depth.last_args = args
-
 	depth.accum_selftime = 0
 }
 
@@ -684,14 +683,14 @@ update_event :: proc(depth: ^Depth, end_ts: i64) -> i64 {
 	id_dt_sz   := u64((0b0000_0110_0000_0000 & type_bytes) >>  9)
 	args_dt_sz := u64((0b0000_0001_1000_0000 & type_bytes) >>  7)
 
-	duration  := end_ts    - depth.last_ts
+	duration  :=       end_ts  - depth.last_ts
 	dur_dt    := u64(duration  ~ depth.last_duration)
-	self_time := duration  - depth.accum_selftime
+	self_time :=     duration  - depth.accum_selftime
 	self_dt   := u64(self_time ~ depth.last_selftime)
 
 	dur_dt_size  := delta_to_size(dur_dt)
 	self_dt_size := delta_to_size(self_dt)
-	has_self_time := self_time == 0
+	has_self_time := self_time != 0
 
 	new_type_bytes : u16 = (
 		(u16(has_addr) << 15) | (1 << 14) | (u16(has_self_time) << 13) | 
@@ -708,9 +707,9 @@ update_event :: proc(depth: ^Depth, end_ts: i64) -> i64 {
 	mem.copy(raw_data(depth.events[i:]), &new_type_bytes,  size_of(u16)); i += size_of(u16)
 	i += i64(dt_size + id_size + args_size)
 
-	mem.copy(raw_data(depth.events[i:]), &dur_dt,  dur_dt_size); i += i64(dur_dt_size)
+	mem.copy(raw_data(depth.events[i:]), &dur_dt,  8); i += i64(dur_dt_size)
 	if has_self_time {
-		mem.copy(raw_data(depth.events[i:]), &self_dt, self_dt_size); i += i64(self_dt_size)
+		mem.copy(raw_data(depth.events[i:]), &self_dt, 8); i += i64(self_dt_size)
 	}
 
 	depth.last_duration = duration

@@ -24,7 +24,13 @@ as_get_next_buffer :: proc(trace: ^Trace, chunk: []u8, buffer_header: ^spall_fmt
 	return .EventRead
 }
 
-as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, thread: ^Thread, current_time: ^i64, current_addr: ^u64, current_caller: ^u64) -> BinaryState {
+DtState :: struct {
+	current_time:   i64,
+	current_addr:   u64,
+	current_caller: u64,
+}
+
+as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, thread: ^Thread, state: ^DtState) -> BinaryState {
 	p := &trace.parser
 
 	min_sz := i64(size_of(u16))
@@ -51,11 +57,13 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
             d_addr   := pull_uval(chunk[chunk_pos(p)+i:], int(addr_size));   i += addr_size
             d_caller := pull_uval(chunk[chunk_pos(p)+i:], int(caller_size)); i += caller_size
 
-            current_time^ = current_time^ + i64(dt)
-            current_addr^ = current_addr^ ~ d_addr
+            state.current_time   += i64(dt)
+            state.current_addr   ~= d_addr
+            state.current_caller ~= d_caller
 
-            id := current_addr^
-            timestamp := current_time^
+            id := state.current_addr
+            caller := state.current_caller
+            timestamp := state.current_time
 
             if thread.max_time > timestamp {
                 post_error(trace, 
@@ -83,7 +91,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
             depth := &thread.depths[thread.current_depth]
             thread.current_depth += 1
 
-			add_event(depth, true, timestamp, id, 0)
+			add_event(depth, true, timestamp, id, caller)
             trace.event_count += 1
 
             p.pos += event_sz
@@ -102,7 +110,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
                 }
                 
                 i : i64 = 1
-                dt := pull_uval(chunk[chunk_pos(p)+i:], int(dt_size));    i += dt_size
+                dt       := pull_uval(chunk[chunk_pos(p)+i:], int(dt_size));   i += dt_size
                 name_len := pull_uval(chunk[chunk_pos(p)+i:], int(name_size)); i += name_size
                 args_len := pull_uval(chunk[chunk_pos(p)+i:], int(arg_size));  i += arg_size
 
@@ -116,8 +124,8 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
                 id   := in_get(&trace.intern, &trace.string_block, name_str)
                 args := in_get(&trace.intern, &trace.string_block, args_str)
 
-                current_time^ = current_time^ + i64(dt)
-                timestamp := current_time^
+                state.current_time += i64(dt)
+                timestamp := state.current_time
 
                 if thread.max_time > timestamp {
                     post_error(trace, 
@@ -144,8 +152,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 
                 depth := &thread.depths[thread.current_depth]
                 thread.current_depth += 1
-
-				add_event(depth, true, timestamp, id, 0)
+				add_event(depth, true, timestamp, id, args)
 
                 trace.event_count += 1
 
@@ -162,7 +169,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 			i : i64 = 1
             dt := pull_uval(chunk[chunk_pos(p)+i:], int(dt_size)); i += dt_size
 
-            ts := current_time^ + i64(dt)
+            ts := state.current_time + i64(dt)
 			if thread.current_depth > 0 {
                 thread.current_depth -= 1
                 depth := &thread.depths[thread.current_depth]
@@ -178,7 +185,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
                 }
             }
             
-            current_time^ = ts
+            state.current_time = ts
             p.pos += event_sz
             return .EventRead
         case:
@@ -196,9 +203,8 @@ as_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 	proc_idx := setup_pid(trace, 0)
 	process := &trace.processes[proc_idx]
 
-	chunk_buffer := make([]u8, 4 * 1024 * 1024)
+	chunk_buffer := make([]u8, 2 * 1024 * 1024)
 	defer delete(chunk_buffer)
-
 
 	read_size, err := os.read_at(fd, chunk_buffer, 0)
 	if err != 0 {
@@ -238,11 +244,13 @@ as_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 
 		buffer_end := p.pos + i64(buffer_header.size)
 
-        current_time   := i64(buffer_header.first_ts)
-        current_addr   := u64(0)
-        current_caller := u64(0)
+        dt_state := DtState{
+			current_time   = i64(buffer_header.first_ts),
+			current_addr   = 0,
+			current_caller = 0,
+		}
 		ev_loop: for p.pos < buffer_end {
-			state := as_parse_next_event(trace, full_chunk, process, thread, &current_time, &current_addr, &current_caller)
+			state := as_parse_next_event(trace, full_chunk, process, thread, &dt_state)
 
 			#partial switch state {
 			case .PartialRead:
