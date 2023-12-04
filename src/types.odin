@@ -352,6 +352,16 @@ Depth :: struct {
 	nodes:  [dynamic]LODInternal,
 	leaves: [dynamic]LODLeaf,
 	events: [dynamic]u8,
+
+	last_ts:        i64,
+	last_id:        u64,
+	last_args:      u64,
+	last_duration:  i64,
+	last_selftime:  i64,
+
+	accum_selftime: i64,
+
+	event_cursor:   i64,
 }
 
 Thread :: struct {

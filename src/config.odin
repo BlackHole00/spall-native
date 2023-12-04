@@ -7,7 +7,6 @@ import "core:bytes"
 import "core:time"
 import "core:runtime"
 import "core:path/filepath"
-import "core:mem"
 import "core:strings"
 
 import "formats:spall_fmt"
@@ -89,37 +88,11 @@ free_trace :: proc(trace: ^Trace) {
 	am_free(&trace.addr_map)
 }
 
+/*
 bound_duration :: proc(ev: ^Event, max_ts: i64) -> i64 {
 	return ev.duration < 0 ? (max_ts - ev.timestamp) : ev.duration
 }
-
-add_event :: proc(events: ^[dynamic]Event, loc := #caller_location) -> ^Event {
-	if cap(events) < len(events)+1 {
-		cap := 3 * cap(events) + max(8, 1)
-		_ = reserve(events, cap, loc)
-	}
-
-	a := (^runtime.Raw_Dynamic_Array)(events)
-	data := ([^]Event)(a.data)
-	ev := &data[a.len]
-	a.len += 1
-
-	return ev
-}
-
-append_event :: proc(events: ^[dynamic]Event, ev: ^Event, loc := #caller_location) {
-	if cap(events) < len(events)+1 {
-		cap := 2 * cap(events) + max(8, 1)
-		_ = reserve(events, cap, loc)
-	}
-
-	a := (^runtime.Raw_Dynamic_Array)(events)
-	data := ([^]Event)(a.data)
-	data[a.len] = ev^
-	a.len += 1
-
-	return
-}
+*/
 
 pid_sort_proc :: proc(a, b: Process) -> bool { return a.min_time < b.min_time }
 tid_sort_proc :: proc(a, b: Thread) -> bool  { return a.min_time < b.min_time }
@@ -379,6 +352,7 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 	}
 }
 
+/*
 ev_name :: proc(trace: ^Trace, ev: ^Event) -> string {
 	if !ev.has_addr {
 		return in_getstr(&trace.string_block, ev.id)
@@ -390,6 +364,7 @@ ev_name :: proc(trace: ^Trace, ev: ^Event) -> string {
 	}
 	return in_getstr(&trace.string_block, name_idx)
 }
+*/
 
 get_line_info :: proc(trace: ^Trace, addr: u64) -> (string, u64, bool) {
 	if len(trace.line_info) == 0 {

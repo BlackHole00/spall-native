@@ -83,50 +83,9 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
             depth := &thread.depths[thread.current_depth]
             thread.current_depth += 1
 
-			ev_off     := len(depth.events)
-			ev_bytes := [size_of(EventMax)]u8{}
-			be_size := pack_begin_event(ev_bytes[:], true, u64(timestamp), id, 0)
-			fmt.printf("B1 | bytes: %x, size: %d\n", ev_bytes, be_size)
-			append_elems(&depth.events, ..ev_bytes[:])
-
-            stack_push_back(&thread.bande_q, ev_off)
+			add_event(depth, true, timestamp, id, 0)
             trace.event_count += 1
 
-            p.pos += event_sz
-            return .EventRead
-        case 1: // MicroEnd
-            dt_size := i64(1 << ((0b00_11_00_00 & type_byte) >> 4))
-            event_sz := 1 + dt_size
-            if chunk_pos(p) + event_sz > i64(len(chunk)) {
-                return .PartialRead
-            }
-
-			i : i64 = 1
-            dt := pull_uval(chunk[chunk_pos(p)+i:], int(dt_size)); i += dt_size
-
-            ts := current_time^ + i64(dt)
-            if thread.bande_q.len > 0 {
-                jev_off := stack_pop_back(&thread.bande_q)
-                thread.current_depth -= 1
-
-                depth := &thread.depths[thread.current_depth]
-                jev, _ := unpack_event(depth.events[jev_off:])
-                jev.duration = ts - jev.timestamp
-                jev.self_time = jev.duration - jev.self_time
-
-				end_time := jev.timestamp + jev.duration
-                thread.max_time      = max(thread.max_time, end_time)
-                trace.total_max_time = max(trace.total_max_time, end_time)
-
-                if thread.bande_q.len > 0 {
-                    parent_depth  := &thread.depths[thread.current_depth - 1]
-                    pev_off := stack_peek_back(&thread.bande_q)
-
-					update_ev_self_time(depth.events[pev_off:], jev.duration)
-                }
-            }
-            
-            current_time^ = ts
             p.pos += event_sz
             return .EventRead
         case 2: // Other Events
@@ -186,18 +145,42 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
                 depth := &thread.depths[thread.current_depth]
                 thread.current_depth += 1
 
-				ev_off     := len(depth.events)
-				ev_bytes := [size_of(EventMax)]u8{}
-				be_size := pack_begin_event(ev_bytes[:], true, u64(timestamp), id, 0)
-				fmt.printf("B2 | bytes: %x, size: %d\n", ev_bytes, be_size)
-				append_elems(&depth.events, ..ev_bytes[:])
+				add_event(depth, true, timestamp, id, 0)
 
-                stack_push_back(&thread.bande_q, ev_off)
                 trace.event_count += 1
 
                 p.pos += i
                 return .EventRead
             }
+        case 1: // MicroEnd
+            dt_size := i64(1 << ((0b00_11_00_00 & type_byte) >> 4))
+            event_sz := 1 + dt_size
+            if chunk_pos(p) + event_sz > i64(len(chunk)) {
+                return .PartialRead
+            }
+
+			i : i64 = 1
+            dt := pull_uval(chunk[chunk_pos(p)+i:], int(dt_size)); i += dt_size
+
+            ts := current_time^ + i64(dt)
+			if thread.current_depth > 0 {
+                thread.current_depth -= 1
+                depth := &thread.depths[thread.current_depth]
+				duration := update_event(depth, ts)
+
+				end_time := depth.last_ts + depth.last_duration
+                thread.max_time      = max(thread.max_time, end_time)
+                trace.total_max_time = max(trace.total_max_time, end_time)
+
+                if thread.current_depth > 0 {
+                    parent_depth  := &thread.depths[thread.current_depth - 1]
+					parent_depth.accum_selftime += duration
+                }
+            }
+            
+            current_time^ = ts
+            p.pos += event_sz
+            return .EventRead
         case:
             post_error(trace, "Invalid event type: %d in file!", data_start[0])
             return .Failure
@@ -258,7 +241,6 @@ as_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
         current_time   := i64(buffer_header.first_ts)
         current_addr   := u64(0)
         current_caller := u64(0)
-        //fmt.printf("starting new buffer for tid %d at %d\n", buffer_header.tid, current_time)
 		ev_loop: for p.pos < buffer_end {
 			state := as_parse_next_event(trace, full_chunk, process, thread, &current_time, &current_addr, &current_caller)
 
@@ -286,7 +268,6 @@ as_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 			}
 		}
 	}
-	os.exit(0)
 
 	// cleanup unfinished events
 	/*
@@ -321,5 +302,21 @@ as_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 	}
 	*/
 
+	event_mem : i64 = 0
+	overhead_mem : i64 = 0
+	for process in &trace.processes {
+		for thread in &process.threads {
+			for depth in thread.depths {
+				event_mem += depth.event_cursor
+				overhead_mem += size_of(Depth)
+			}
+			overhead_mem += size_of(Thread)
+		}
+		overhead_mem += size_of(Process)
+	}
+	fmt.printf("used %v MB for events!\n", f64(event_mem) / 1024 / 1024)
+	fmt.printf("used %v MB for org overhead!\n", f64(overhead_mem) / 1024 / 1024)
+
+	if true { os.exit(0) }
 	return true
 }

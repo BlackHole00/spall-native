@@ -249,7 +249,7 @@ spall_ctx: spall.Context
 SELF_TRACE :: false
 FULL_SPEED :: false
 GOOD_BOY_MODE :: false
-terminal_mode := false
+terminal_mode := true
 main :: proc() {
 	when SELF_TRACE {
 		current_time := time.time_to_unix(time.now())
@@ -285,7 +285,8 @@ main :: proc() {
 		ui_state.ui_mode = .TraceView
 	}
 
-	thread_count := max(os.processor_core_count() - 1, 1)
+	//thread_count := max(os.processor_core_count() - 1, 1)
+	thread_count := 0
 	pool_init(&global_pool, thread_count)
 
 	trace := new(Trace)
