@@ -596,18 +596,12 @@ step_right_rune :: proc(buffer: []u8, cur: int) -> int {
 	return pos
 }
 
-squash_table_1 := [9]u8{1, 1, 2, 4, 4, 8, 8, 8, 8}
-delta_to_size :: proc(v: u64) -> int {
-	v := max(1, v)
-	set_bits  := 64 - intrinsics.count_leading_zeros(v)
-	set_bytes := (set_bits + 7) >> 3
-
-	return int(squash_table_1[set_bytes])
-}
-
-squash_table_2 := [9]u8{0, 0, 1, 2, 2, 3, 3, 3, 3}
-size_to_bits :: #force_inline proc(size: int) -> u16 {
-	return u16(squash_table_2[size])
+delta_to_bits :: proc(v: u64) -> u64 {
+	cnt : u32 = 0
+	cnt += u32(v >= 0x100)
+	cnt += u32(v >= 0x10000)
+	cnt += u32(v >= 0x100000000)
+	return u64(cnt)
 }
 
 pull_uval :: #force_inline proc(buffer: []u8, size: int) -> u64 {
@@ -625,15 +619,16 @@ pull_uval :: #force_inline proc(buffer: []u8, size: int) -> u64 {
 // [ has addr | has duration | has self time | [ts dt size] | [id dt size] | [args dt size] | [dur dt size] | [self dt size] ]
 
 pack_begin_event :: proc(buffer: []u8, has_addr: bool, ts_dt, id_dt, args_dt: u64) -> int {
-	ts_dt_size   := delta_to_size(ts_dt)
-	id_dt_size   := delta_to_size(id_dt)
-	args_dt_size := delta_to_size(args_dt)
+	ts_dt_bits   := delta_to_bits(ts_dt)
+	id_dt_bits   := delta_to_bits(id_dt)
+	args_dt_bits := delta_to_bits(args_dt)
+
+	ts_dt_size := 1 << ts_dt_bits
+	id_dt_size := 1 << id_dt_bits
+	args_dt_size := 1 << args_dt_bits
 
 	ev_tag : u16 = (
-		(u16(has_addr) << 15) | (0 << 14) | (0 << 13) | 
-		size_to_bits(ts_dt_size)   << 11 | 
-		size_to_bits(id_dt_size)   <<  9 | 
-		size_to_bits(args_dt_size) <<  7 | 0
+		(u16(has_addr) << 15) | (0 << 14) | (0 << 13) | u16(ts_dt_bits << 11) | u16(id_dt_bits << 9) | u16(args_dt_bits << 7)
 	)
 
 	ts_dt   := ts_dt
@@ -688,8 +683,10 @@ update_event :: proc(depth: ^Depth, end_ts: i64) -> i64 {
 	self_time :=     duration  - depth.accum_selftime
 	self_dt   := u64(self_time ~ depth.last_selftime)
 
-	dur_dt_size  := delta_to_size(dur_dt)
-	self_dt_size := delta_to_size(self_dt)
+	dur_dt_bits  := delta_to_bits(dur_dt)
+	self_dt_bits := delta_to_bits(self_dt)
+	dur_dt_size  := 1 << dur_dt_bits
+	self_dt_size := 1 << self_dt_bits
 	has_self_time := self_time != 0
 
 	new_type_bytes : u16 = (
@@ -697,8 +694,8 @@ update_event :: proc(depth: ^Depth, end_ts: i64) -> i64 {
 		(u16(ts_dt_sz   << 11)) | 
 		(u16(id_dt_sz   <<  9)) | 
 		(u16(args_dt_sz <<  7)) |
-		size_to_bits(dur_dt_size)  <<  5 |
-		size_to_bits(self_dt_size) <<  3
+		u16(dur_dt_bits  <<  5) |
+		u16(self_dt_bits <<  3)
 	)
 
 	dt_size   := 1 << ts_dt_sz
