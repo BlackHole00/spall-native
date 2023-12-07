@@ -676,8 +676,8 @@ update_event :: proc(depth: ^Depth, end_ts: i64) -> i64 {
 
 	dur_dt_bits  := delta_to_bits(dur_dt)
 	self_dt_bits := delta_to_bits(self_dt)
-	dur_dt_size  := 1 << dur_dt_bits
-	self_dt_size := 1 << self_dt_bits
+	dur_dt_size  := u64(1 << dur_dt_bits)
+	self_dt_size := u64(1 << self_dt_bits)
 	has_self_time := self_time != 0
 
 	ev := depth.ev_cache
@@ -690,20 +690,20 @@ update_event :: proc(depth: ^Depth, end_ts: i64) -> i64 {
 		u16(self_dt_bits <<  3)
 	)
 
-	dt_size   := 1 << ev.ts_dt_bits
-	id_size   := 1 << ev.id_dt_bits
-	args_size := 1 << ev.args_dt_bits
-	i := depth.event_cursor
+	dt_size   := u64(1 << ev.ts_dt_bits)
+	id_size   := u64(1 << ev.id_dt_bits)
+	args_size := u64(1 << ev.args_dt_bits)
+	i := u64(depth.event_cursor)
 	mem.copy(raw_data(depth.events[i:]), &new_type_bytes,  size_of(u16)); i += size_of(u16)
-	i += i64(dt_size + id_size + args_size)
+	i += dt_size + id_size + args_size
 
-	mem.copy(raw_data(depth.events[i:]), &dur_dt,  8); i += i64(dur_dt_size)
+	mem.copy(raw_data(depth.events[i:]), &dur_dt,  8); i += dur_dt_size
 	if has_self_time {
-		mem.copy(raw_data(depth.events[i:]), &self_dt, 8); i += i64(self_dt_size)
+		mem.copy(raw_data(depth.events[i:]), &self_dt, 8); i += self_dt_size
 	}
 
 	depth.last_duration = duration
 	depth.last_selftime = self_time
-	depth.event_cursor  = i
+	depth.event_cursor  = i64(i)
 	return duration
 }
