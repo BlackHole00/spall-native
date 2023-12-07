@@ -44,9 +44,9 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 
     switch type_tag {
         case 0: // MicroBegin
-            dt_size     := i64(1 << ((0b00_11_00_00 & type_byte) >> 4))
-            addr_size   := i64(1 << ((0b00_00_11_00 & type_byte) >> 2))
-            caller_size := i64(1 <<  (0b00_00_00_11 & type_byte))
+            dt_size     := i64(1 << (((0b00_11_00_00 & type_byte) >> 4) & 63))
+            addr_size   := i64(1 << (((0b00_00_11_00 & type_byte) >> 2) & 63))
+            caller_size := i64(1 << ((0b00_00_00_11 & type_byte) & 63))
             event_sz := 1 + dt_size + addr_size + caller_size
             if chunk_pos(p) + event_sz > i64(len(chunk)) {
                 return .PartialRead
@@ -100,9 +100,9 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
             type := spall_fmt.Auto_Event_Type((0b00_11_00_00 & type_byte) >> 4)
             #partial switch type {
             case .Begin:
-                dt_size   := i64(1 << ((0b00_00_11_00 & type_byte) >> 2))
-                name_size := i64(1 << ((0b00_00_00_10 & type_byte) >> 1))
-                arg_size  := i64(1 << (0b00_00_00_01 & type_byte))
+                dt_size   := i64(1 << (((0b00_00_11_00 & type_byte) >> 2) & 63))
+                name_size := i64(1 << (((0b00_00_00_10 & type_byte) >> 1) & 63))
+                arg_size  := i64(1 << ((0b00_00_00_01 & type_byte) & 63))
 
                 min_event_sz := 1 + dt_size + name_size + arg_size
                 if chunk_pos(p) + min_event_sz > i64(len(chunk)) {
@@ -160,7 +160,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
                 return .EventRead
             }
         case 1: // MicroEnd
-            dt_size := i64(1 << ((0b00_11_00_00 & type_byte) >> 4))
+            dt_size := i64(1 << (((0b00_11_00_00 & type_byte) >> 4) & 63))
             event_sz := 1 + dt_size
             if chunk_pos(p) + event_sz > i64(len(chunk)) {
                 return .PartialRead

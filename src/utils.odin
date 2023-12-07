@@ -625,7 +625,7 @@ bump_arr_cap :: proc(array: ^[dynamic]u8, max_bump, real_bump: int, loc := #call
 	a.len += real_bump
 	return
 }
-update_arr_len :: proc(array: ^[dynamic]u8, len: int) {
+update_arr_len :: #force_inline proc(array: ^[dynamic]u8, len: int) {
 	a := (^runtime.Raw_Dynamic_Array)(array)
 	a.len = len
 	return
@@ -634,7 +634,7 @@ update_arr_len :: proc(array: ^[dynamic]u8, len: int) {
 // Internal Event Format
 //      1            2               3             4 5           6 7              8 9              10 11          12 13
 // [ has addr | has duration | has self time | [ts dt size] | [id dt size] | [args dt size] | [dur dt size] | [self dt size] ]
-add_event :: proc(depth: ^Depth, has_addr: bool, ts: i64, id, args: u64) {
+add_event :: #force_inline proc(depth: ^Depth, has_addr: bool, ts: i64, id, args: u64) {
 	ts_dt   := ts   - depth.last_ts
 	id_dt   := id   ~ depth.last_id
 	args_dt := args ~ depth.last_args
@@ -643,9 +643,9 @@ add_event :: proc(depth: ^Depth, has_addr: bool, ts: i64, id, args: u64) {
 	id_dt_bits   := delta_to_bits(u64(id_dt))
 	args_dt_bits := delta_to_bits(u64(args_dt))
 
-	ts_dt_size := u64(1 << ts_dt_bits)
-	id_dt_size := u64(1 << id_dt_bits)
-	args_dt_size := u64(1 << args_dt_bits)
+	ts_dt_size := u64(1 << (ts_dt_bits & 63))
+	id_dt_size := u64(1 << (id_dt_bits & 63))
+	args_dt_size := u64(1 << (args_dt_bits & 63))
 
 	real_size := int(size_of(u16) + ts_dt_size + id_dt_size + args_dt_size)
 	bump_arr_cap(&depth.events, size_of(EventMax), real_size)
@@ -674,7 +674,7 @@ add_event :: proc(depth: ^Depth, has_addr: bool, ts: i64, id, args: u64) {
 	}
 }
 
-update_event :: proc(depth: ^Depth, end_ts: i64) -> i64 {
+update_event :: #force_inline proc(depth: ^Depth, end_ts: i64) -> i64 {
 	duration  :=       end_ts  - depth.last_ts
 	dur_dt    := u64(duration  ~ depth.last_duration)
 	self_time :=     duration  - depth.accum_selftime
@@ -682,8 +682,8 @@ update_event :: proc(depth: ^Depth, end_ts: i64) -> i64 {
 
 	dur_dt_bits  := delta_to_bits(dur_dt)
 	self_dt_bits := delta_to_bits(self_dt)
-	dur_dt_size  := u64(1 << dur_dt_bits)
-	self_dt_size := u64(1 << self_dt_bits)
+	dur_dt_size  := u64(1 << (dur_dt_bits & 63))
+	self_dt_size := u64(1 << (self_dt_bits & 63))
 	has_self_time := self_time != 0
 
 	ev := depth.ev_cache
@@ -692,13 +692,13 @@ update_event :: proc(depth: ^Depth, end_ts: i64) -> i64 {
 		u16(ev.ts_dt_bits   << 11) | 
 		u16(ev.id_dt_bits   <<  9) | 
 		u16(ev.args_dt_bits <<  7) |
-		u16(dur_dt_bits  <<  5) |
-		u16(self_dt_bits <<  3)
+		u16(dur_dt_bits     <<  5) |
+		u16(self_dt_bits    <<  3)
 	)
 
-	dt_size   := u64(1 << ev.ts_dt_bits)
-	id_size   := u64(1 << ev.id_dt_bits)
-	args_size := u64(1 << ev.args_dt_bits)
+	dt_size   := u64(1 << (ev.ts_dt_bits & 63))
+	id_size   := u64(1 << (ev.id_dt_bits & 63))
+	args_size := u64(1 << (ev.args_dt_bits & 63))
 
 	i := u64(depth.event_cursor)
 	mem.copy(raw_data(depth.events[i:]), &new_type_bytes,  size_of(u16)); i += size_of(u16)
