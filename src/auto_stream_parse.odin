@@ -311,6 +311,8 @@ as_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 	}
 	fmt.printf("used %v MB for events!\n", f64(event_mem) / 1024 / 1024)
 	fmt.printf("used %v MB for org overhead!\n", f64(overhead_mem) / 1024 / 1024)
+	fmt.printf("Loaded %s events!\n", tens_fmt(trace.event_count))
+	fmt.printf("Average Event Size: %v bytes\n", f64(event_mem) / f64(trace.event_count))
 
 	if true { os.exit(0) }
 	return true
