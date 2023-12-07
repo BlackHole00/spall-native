@@ -614,15 +614,20 @@ pull_uval :: #force_inline proc(buffer: []u8, size: int) -> u64 {
     return 0
 }
 
-bump_arr_cap :: proc(array: ^[dynamic]u8, bump: int, loc := #caller_location) {
-	if cap(array) < (len(array) + bump) {
-		cap := 2 * cap(array) + max(8, bump)
+bump_arr_cap :: proc(array: ^[dynamic]u8, max_bump, real_bump: int, loc := #caller_location) {
+	if cap(array) < (len(array) + max_bump) {
+		cap := 2 * cap(array) + max(8, max_bump)
 
 		// do not 'or_return' here as it could be a partial success
 		non_zero_reserve(array, cap, loc)
 	}
 	a := (^runtime.Raw_Dynamic_Array)(array)
-	a.len += bump
+	a.len += real_bump
+	return
+}
+update_arr_len :: proc(array: ^[dynamic]u8, rem_len: int) {
+	a := (^runtime.Raw_Dynamic_Array)(array)
+	a.len += rem_len
 	return
 }
 
@@ -634,8 +639,6 @@ add_event :: proc(depth: ^Depth, has_addr: bool, ts: i64, id, args: u64) {
 	id_dt   := id   ~ depth.last_id
 	args_dt := args ~ depth.last_args
 
-	bump_arr_cap(&depth.events, size_of(EventMax))
-
 	ts_dt_bits   := delta_to_bits(u64(ts_dt))
 	id_dt_bits   := delta_to_bits(u64(id_dt))
 	args_dt_bits := delta_to_bits(u64(args_dt))
@@ -643,6 +646,9 @@ add_event :: proc(depth: ^Depth, has_addr: bool, ts: i64, id, args: u64) {
 	ts_dt_size := u64(1 << ts_dt_bits)
 	id_dt_size := u64(1 << id_dt_bits)
 	args_dt_size := u64(1 << args_dt_bits)
+
+	real_size := int(size_of(u16) + ts_dt_size + id_dt_size + args_dt_size)
+	bump_arr_cap(&depth.events, size_of(EventMax), real_size)
 
 	ev_tag : u16 = (
 		(u16(has_addr) << 15) | (0 << 14) | (0 << 13) |
@@ -701,6 +707,8 @@ update_event :: proc(depth: ^Depth, end_ts: i64) -> i64 {
 	if has_self_time {
 		mem.copy(raw_data(depth.events[i:]), &self_dt, 8); i += self_dt_size
 	}
+
+	update_arr_len(&depth.events, int(i) - len(depth.events))
 
 	depth.last_duration = duration
 	depth.last_selftime = self_time
