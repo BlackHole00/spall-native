@@ -625,9 +625,9 @@ bump_arr_cap :: proc(array: ^[dynamic]u8, max_bump, real_bump: int, loc := #call
 	a.len += real_bump
 	return
 }
-update_arr_len :: proc(array: ^[dynamic]u8, rem_len: int) {
+update_arr_len :: proc(array: ^[dynamic]u8, len: int) {
 	a := (^runtime.Raw_Dynamic_Array)(array)
-	a.len += rem_len
+	a.len = len
 	return
 }
 
@@ -708,7 +708,7 @@ update_event :: proc(depth: ^Depth, end_ts: i64) -> i64 {
 		mem.copy(raw_data(depth.events[i:]), &self_dt, 8); i += self_dt_size
 	}
 
-	update_arr_len(&depth.events, int(i) - len(depth.events))
+	update_arr_len(&depth.events, int(i))
 
 	depth.last_duration = duration
 	depth.last_selftime = self_time
