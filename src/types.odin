@@ -348,13 +348,6 @@ LODLeaf :: struct #packed {
 	event_count: u8,
 }
 
-EventCache :: struct {
-	has_addr:     b8,
-	ts_dt_bits:   u8,
-	id_dt_bits:   u8,
-	args_dt_bits: u8,
-}
-
 Depth :: struct {
 	nodes:  [dynamic]LODInternal,
 	leaves: [dynamic]LODLeaf,
@@ -369,8 +362,6 @@ Depth :: struct {
 	accum_selftime: i64,
 
 	event_cursor:   i64,
-
-	ev_cache: EventCache,
 }
 
 Thread :: struct {

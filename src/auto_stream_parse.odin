@@ -71,13 +71,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
                     0, thread.id, id, trace.event_count)
                 return .Failure
             }
-
-            process.min_time = min(process.min_time, timestamp)
-            thread.min_time  = min(thread.min_time, timestamp)
             thread.max_time  = timestamp
-
-            trace.total_min_time = min(trace.total_min_time, timestamp)
-            trace.total_max_time = max(trace.total_max_time, timestamp)
 
             if thread.current_depth >= len(thread.depths) {
                 depth := Depth{
@@ -133,13 +127,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
                         0, thread.id, name_str, trace.event_count)
                     return .Failure
                 }
-
-                process.min_time = min(process.min_time, timestamp)
-                thread.min_time  = min(thread.min_time, timestamp)
-                thread.max_time  = timestamp
-
-                trace.total_min_time = min(trace.total_min_time, timestamp)
-                trace.total_max_time = max(trace.total_max_time, timestamp)
+                thread.max_time = timestamp
 
                 if thread.current_depth >= len(thread.depths) {
                     depth := Depth{
@@ -176,8 +164,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 				duration := update_event(depth, ts)
 
 				end_time := depth.last_ts + depth.last_duration
-                thread.max_time      = max(thread.max_time, end_time)
-                trace.total_max_time = max(trace.total_max_time, end_time)
+                thread.max_time = end_time
 
                 if thread.current_depth > 0 {
                     parent_depth  := &thread.depths[thread.current_depth - 1]
