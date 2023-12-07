@@ -614,35 +614,6 @@ pull_uval :: #force_inline proc(buffer: []u8, size: int) -> u64 {
     return 0
 }
 
-// Internal Event Format
-//      1            2               3             4 5           6 7              8 9              10 11          12 13
-// [ has addr | has duration | has self time | [ts dt size] | [id dt size] | [args dt size] | [dur dt size] | [self dt size] ]
-
-pack_begin_event :: proc(buffer: []u8, has_addr: bool, ts_dt, id_dt, args_dt: u64) -> int {
-	ts_dt_bits   := delta_to_bits(ts_dt)
-	id_dt_bits   := delta_to_bits(id_dt)
-	args_dt_bits := delta_to_bits(args_dt)
-
-	ts_dt_size := 1 << ts_dt_bits
-	id_dt_size := 1 << id_dt_bits
-	args_dt_size := 1 << args_dt_bits
-
-	ev_tag : u16 = (
-		(u16(has_addr) << 15) | (0 << 14) | (0 << 13) | u16(ts_dt_bits << 11) | u16(id_dt_bits << 9) | u16(args_dt_bits << 7)
-	)
-
-	ts_dt   := ts_dt
-	id_dt   := id_dt
-	args_dt := args_dt
-
-	i := 0
-	mem.copy(raw_data(buffer[i:]), &ev_tag,  size_of(u16)); i += size_of(u16)
-	mem.copy(raw_data(buffer[i:]), &ts_dt,   8);   i += ts_dt_size
-	mem.copy(raw_data(buffer[i:]), &id_dt,   8);   i += id_dt_size
-	mem.copy(raw_data(buffer[i:]), &args_dt, 8); i += args_dt_size
-	return i
-}
-
 bump_arr_cap :: proc(array: ^[dynamic]u8, bump: int, loc := #caller_location) {
 	if cap(array) < (len(array) + bump) {
 		cap := 2 * cap(array) + max(8, bump)
@@ -655,29 +626,49 @@ bump_arr_cap :: proc(array: ^[dynamic]u8, bump: int, loc := #caller_location) {
 	return
 }
 
+// Internal Event Format
+//      1            2               3             4 5           6 7              8 9              10 11          12 13
+// [ has addr | has duration | has self time | [ts dt size] | [id dt size] | [args dt size] | [dur dt size] | [self dt size] ]
 add_event :: proc(depth: ^Depth, has_addr: bool, ts: i64, id, args: u64) {
-	dt_ts   := ts   - depth.last_ts
-	dt_id   := id   ~ depth.last_id
-	dt_args := args ~ depth.last_args
+	ts_dt   := ts   - depth.last_ts
+	id_dt   := id   ~ depth.last_id
+	args_dt := args ~ depth.last_args
 
 	bump_arr_cap(&depth.events, size_of(EventMax))
-	pack_begin_event(depth.events[depth.event_cursor:], has_addr, u64(dt_ts), dt_id, dt_args)
+
+	ts_dt_bits   := delta_to_bits(u64(ts_dt))
+	id_dt_bits   := delta_to_bits(u64(id_dt))
+	args_dt_bits := delta_to_bits(u64(args_dt))
+
+	ts_dt_size := u64(1 << ts_dt_bits)
+	id_dt_size := u64(1 << id_dt_bits)
+	args_dt_size := u64(1 << args_dt_bits)
+
+	ev_tag : u16 = (
+		(u16(has_addr) << 15) | (0 << 14) | (0 << 13) |
+		u16(ts_dt_bits << 11) | u16(id_dt_bits << 9) | u16(args_dt_bits << 7)
+	)
+
+	i := u64(depth.event_cursor)
+	mem.copy(raw_data(depth.events[i:]), &ev_tag,  size_of(u16)); i += size_of(u16)
+	mem.copy(raw_data(depth.events[i:]), &ts_dt,   8); i += ts_dt_size
+	mem.copy(raw_data(depth.events[i:]), &id_dt,   8); i += id_dt_size
+	mem.copy(raw_data(depth.events[i:]), &args_dt, 8); i += args_dt_size
 
 	depth.last_ts   = ts
 	depth.last_id   = id
 	depth.last_args = args
 	depth.accum_selftime = 0
+
+	depth.ev_cache = EventCache {
+		has_addr     = b8(has_addr),
+		ts_dt_bits   = u8(ts_dt_bits),
+		id_dt_bits   = u8(id_dt_bits),
+		args_dt_bits = u8(args_dt_bits),
+	}
 }
 
 update_event :: proc(depth: ^Depth, end_ts: i64) -> i64 {
-	i := depth.event_cursor
-	type_bytes := pull_uval(depth.events[i:], size_of(u16))
-
-	has_addr   := bool((0b1000_0000_0000_0000 & type_bytes) >> 15)
-	ts_dt_sz   := u64((0b0001_1000_0000_0000 & type_bytes) >> 11)
-	id_dt_sz   := u64((0b0000_0110_0000_0000 & type_bytes) >>  9)
-	args_dt_sz := u64((0b0000_0001_1000_0000 & type_bytes) >>  7)
-
 	duration  :=       end_ts  - depth.last_ts
 	dur_dt    := u64(duration  ~ depth.last_duration)
 	self_time :=     duration  - depth.accum_selftime
@@ -689,18 +680,20 @@ update_event :: proc(depth: ^Depth, end_ts: i64) -> i64 {
 	self_dt_size := 1 << self_dt_bits
 	has_self_time := self_time != 0
 
+	ev := depth.ev_cache
 	new_type_bytes : u16 = (
-		(u16(has_addr) << 15) | (1 << 14) | (u16(has_self_time) << 13) | 
-		(u16(ts_dt_sz   << 11)) | 
-		(u16(id_dt_sz   <<  9)) | 
-		(u16(args_dt_sz <<  7)) |
+		(u16(ev.has_addr) << 15) | (1 << 14) | (u16(has_self_time) << 13) | 
+		u16(ev.ts_dt_bits   << 11) | 
+		u16(ev.id_dt_bits   <<  9) | 
+		u16(ev.args_dt_bits <<  7) |
 		u16(dur_dt_bits  <<  5) |
 		u16(self_dt_bits <<  3)
 	)
 
-	dt_size   := 1 << ts_dt_sz
-	id_size   := 1 << id_dt_sz
-	args_size := 1 << args_dt_sz
+	dt_size   := 1 << ev.ts_dt_bits
+	id_size   := 1 << ev.id_dt_bits
+	args_size := 1 << ev.args_dt_bits
+	i := depth.event_cursor
 	mem.copy(raw_data(depth.events[i:]), &new_type_bytes,  size_of(u16)); i += size_of(u16)
 	i += i64(dt_size + id_size + args_size)
 
