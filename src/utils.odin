@@ -416,7 +416,7 @@ u64_to_hexstr :: proc(buf: []byte, val: u64) -> string {
 	return string(buf[i:])
 }
 
-// this *shouldn't* be called with 0-len strings. 
+// this *shouldn't* be called with 0-len strings.
 // The current JSON parser enforces it due to the way primitives are parsed
 // We reject NaNs, Infinities, and Exponents in this house.
 parse_f64 :: proc(str: string) -> (ret: f64, ok: bool) #no_bounds_check {
@@ -609,13 +609,8 @@ pull_uval_16 :: #force_inline proc(buffer: []u8) -> u64 {
 }
 
 pull_uval :: #force_inline proc(buffer: []u8, size: int) -> u64 {
-	switch size {
-		case 1: return u64(((^u8)(raw_data(buffer)))^)
-		case 2: return u64(((^u16)(raw_data(buffer)))^)
-		case 4: return u64(((^u32)(raw_data(buffer)))^)
-		case 8: return u64(((^u64)(raw_data(buffer)))^)
-	}
-	return 0
+    mask: u64 = 0xFFFFFFFFFFFFFFFF >> u64(64 - (size*8))
+    return u64(((^u64)(raw_data(buffer)))^) & mask
 }
 
 bump_arr_cap :: proc(array: ^[dynamic]u8, max_bump, real_bump: int, loc := #caller_location) {

@@ -44,52 +44,43 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 
     switch type_tag {
         case 0: // MicroBegin
-            dt_size     := i64(1 << (((0b00_11_00_00 & type_byte) >> 4) & 63))
-            addr_size   := i64(1 << (((0b00_00_11_00 & type_byte) >> 2) & 63))
-            caller_size := i64(1 << ((0b00_00_00_11 & type_byte) & 63))
-            event_sz := 1 + dt_size + addr_size + caller_size
-            if chunk_pos(p) + event_sz > i64(len(chunk)) {
-                return .PartialRead
-            }
+		dt_size     := i64(1 << (((0b00_11_00_00 & type_byte) >> 4) & 63))
+		addr_size   := i64(1 << (((0b00_00_11_00 & type_byte) >> 2) & 63))
+		caller_size := i64(1 << ((0b00_00_00_11 & type_byte) & 63))
+		event_sz := 1 + dt_size + addr_size + caller_size
+		if chunk_pos(p) + event_sz > i64(len(chunk)) {
+			return .PartialRead
+		}
 
-			i : i64 = 1
-            dt       := pull_uval(chunk[chunk_pos(p)+i:], int(dt_size));     i += dt_size
-            d_addr   := pull_uval(chunk[chunk_pos(p)+i:], int(addr_size));   i += addr_size
-            d_caller := pull_uval(chunk[chunk_pos(p)+i:], int(caller_size)); i += caller_size
+		i : i64 = 1
+		dt       := pull_uval(chunk[chunk_pos(p)+i:], int(dt_size));     i += dt_size
+		d_addr   := pull_uval(chunk[chunk_pos(p)+i:], int(addr_size));   i += addr_size
+		d_caller := pull_uval(chunk[chunk_pos(p)+i:], int(caller_size)); i += caller_size
 
-            state.current_time   += i64(dt)
-            state.current_addr   ~= d_addr
-            state.current_caller ~= d_caller
+		state.current_time   += i64(dt)
+		state.current_addr   ~= d_addr
+		state.current_caller ~= d_caller
 
-            id := state.current_addr
-            caller := state.current_caller
-            timestamp := state.current_time
+		id := state.current_addr
+		caller := state.current_caller
+		timestamp := state.current_time
 
-            if thread.max_time > timestamp {
-                post_error(trace, 
-                    "Woah, time-travel? You just had a begin event that started before a previous one; [pid: %d, tid: %d, addr: 0x%x, event_count: %d]", 
-                    0, thread.id, id, trace.event_count)
-                return .Failure
-            }
-            thread.max_time  = timestamp
+		if thread.max_time > timestamp {
+			post_error(trace,
+			    "Woah, time-travel? You just had a begin event that started before a previous one; [pid: %d, tid: %d, addr: 0x%x, event_count: %d]",
+			    0, thread.id, id, trace.event_count)
+			return .Failure
+		}
+		thread.max_time  = timestamp
 
-            if thread.current_depth >= len(thread.depths) {
-                depth := Depth{
-					nodes  = make([dynamic]LODInternal),
-					leaves = make([dynamic]LODLeaf),
-                    events = make([dynamic]u8),
-                }
-                non_zero_append(&thread.depths, depth)
-            }
+		depth := &thread.depths[thread.current_depth]
+		thread.current_depth += 1
 
-            depth := &thread.depths[thread.current_depth]
-            thread.current_depth += 1
+		add_event(depth, true, timestamp, id, caller)
+		trace.event_count += 1
 
-			add_event(depth, true, timestamp, id, caller)
-            trace.event_count += 1
-
-            p.pos += event_sz
-            return .EventRead
+		p.pos += event_sz
+		return .EventRead
         case 2: // Other Events
             type := spall_fmt.Auto_Event_Type((0b00_11_00_00 & type_byte) >> 4)
             #partial switch type {
@@ -100,9 +91,9 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 
                 min_event_sz := 1 + dt_size + name_size + arg_size
                 if chunk_pos(p) + min_event_sz > i64(len(chunk)) {
-                    return .PartialRead
+                	return .PartialRead
                 }
-                
+
                 i : i64 = 1
                 dt       := pull_uval(chunk[chunk_pos(p)+i:], int(dt_size));   i += dt_size
                 name_len := pull_uval(chunk[chunk_pos(p)+i:], int(name_size)); i += name_size
@@ -110,7 +101,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 
                 event_tail := i64(name_len) + i64(args_len)
                 if (chunk_pos(p) + min_event_sz + event_tail) > i64(len(chunk)) {
-                    return .PartialRead
+                	return .PartialRead
                 }
 
                 name_str := string(data_start[i:i+i64(name_len)]); i += i64(name_len)
@@ -122,63 +113,54 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
                 timestamp := state.current_time
 
                 if thread.max_time > timestamp {
-                    post_error(trace, 
-                        "Woah, time-travel? You just had a begin event that started before a previous one; [pid: %d, tid: %d, name: %s, event_count: %d]", 
+                    post_error(trace,
+                        "Woah, time-travel? You just had a begin event that started before a previous one; [pid: %d, tid: %d, name: %s, event_count: %d]",
                         0, thread.id, name_str, trace.event_count)
                     return .Failure
                 }
                 thread.max_time = timestamp
 
-                if thread.current_depth >= len(thread.depths) {
-                    depth := Depth{
-						nodes  = make([dynamic]LODInternal),
-						leaves = make([dynamic]LODLeaf),
-						events = make([dynamic]u8),
-                    }
-                    non_zero_append(&thread.depths, depth)
-                }
-
                 depth := &thread.depths[thread.current_depth]
                 thread.current_depth += 1
-				add_event(depth, true, timestamp, id, args)
+                add_event(depth, true, timestamp, id, args)
 
                 trace.event_count += 1
 
                 p.pos += i
                 return .EventRead
             }
-        case 1: // MicroEnd
-            dt_size := i64(1 << (((0b00_11_00_00 & type_byte) >> 4) & 63))
-            event_sz := 1 + dt_size
-            if chunk_pos(p) + event_sz > i64(len(chunk)) {
-                return .PartialRead
-            }
+	case 1: // MicroEnd
+		dt_size := i64(1 << (((0b00_11_00_00 & type_byte) >> 4) & 63))
+		event_sz := 1 + dt_size
+		if chunk_pos(p) + event_sz > i64(len(chunk)) {
+			return .PartialRead
+		}
 
-			i : i64 = 1
-            dt := pull_uval(chunk[chunk_pos(p)+i:], int(dt_size)); i += dt_size
+		i : i64 = 1
+		dt := pull_uval(chunk[chunk_pos(p)+i:], int(dt_size)); i += dt_size
 
-            ts := state.current_time + i64(dt)
+		ts := state.current_time + i64(dt)
+		if thread.current_depth > 0 {
+			thread.current_depth -= 1
+			depth := &thread.depths[thread.current_depth]
+			duration := update_event(depth, ts)
+
+			end_time := depth.last_ts + depth.last_duration
+			thread.max_time = end_time
+
 			if thread.current_depth > 0 {
-                thread.current_depth -= 1
-                depth := &thread.depths[thread.current_depth]
-				duration := update_event(depth, ts)
+				parent_depth  := &thread.depths[thread.current_depth - 1]
+				parent_depth.accum_selftime += duration
+			}
+		}
 
-				end_time := depth.last_ts + depth.last_duration
-                thread.max_time = end_time
-
-                if thread.current_depth > 0 {
-                    parent_depth  := &thread.depths[thread.current_depth - 1]
-					parent_depth.accum_selftime += duration
-                }
-            }
-            
-            state.current_time = ts
-            p.pos += event_sz
-            return .EventRead
+		state.current_time = ts
+		p.pos += event_sz
+		return .EventRead
         case:
-            post_error(trace, "Invalid event type: %d in file!", data_start[0])
-            return .Failure
-    }
+		post_error(trace, "Invalid event type: %d in file!", data_start[0])
+		return .Failure
+	}
 
 	return .PartialRead
 }
@@ -228,10 +210,18 @@ as_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 
 		thread_idx := setup_tid(trace, proc_idx, buffer_header.tid)
 		thread := &process.threads[thread_idx]
+		for u32(len(thread.depths)) <= buffer_header.max_depth {
+			depth := Depth{
+				nodes  = make([dynamic]LODInternal),
+				leaves = make([dynamic]LODLeaf),
+				events = make([dynamic]u8),
+			}
+			non_zero_append(&thread.depths, depth)
+		}
 
 		buffer_end := p.pos + i64(buffer_header.size)
 
-        dt_state := DtState{
+		dt_state := DtState{
 			current_time   = i64(buffer_header.first_ts),
 			current_addr   = 0,
 			current_caller = 0,
