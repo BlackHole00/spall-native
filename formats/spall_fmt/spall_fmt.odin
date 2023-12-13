@@ -42,6 +42,7 @@ Buffer_Header :: struct #packed {
     tid: u32,
     first_ts: u64,
     max_depth: u32,
+    end_depth: u32,
 }
 
 Auto_Begin_Event :: struct #packed {

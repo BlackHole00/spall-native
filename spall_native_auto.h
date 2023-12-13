@@ -191,6 +191,7 @@ typedef struct SpallBufferHeader {
     uint32_t tid;
     uint64_t first_ts;
     uint32_t max_depth;
+    uint32_t end_depth;
 } SpallBufferHeader;
 
 #pragma pack(pop)
@@ -538,6 +539,7 @@ SPALL_NOINSTRUMENT SPALL_FORCEINLINE bool spall_auto_buffer_flush(void) {
         sbp->size = (uint32_t)(spall_buffer->head - sizeof(SpallBufferHeader));
         sbp->first_ts = spall_buffer->first_ts;
         sbp->max_depth = spall_buffer->max_depth;
+        sbp->end_depth = spall_buffer->current_depth;
         if (!spall__file_write(spall_buffer->data + data_start, spall_buffer->head)) return false;
 
         spall_buffer->write_half = !spall_buffer->write_half;
@@ -558,15 +560,15 @@ SPALL_NOINSTRUMENT SPALL_FORCEINLINE bool spall_auto_buffer_flush(void) {
 }
 
 SPALL_FN SPALL_FORCEINLINE bool spall_buffer_micro_begin(uint64_t addr, uint64_t caller) {
-    spall_buffer->current_depth += 1;
-    spall_buffer->max_depth = SPALL_MAX(spall_buffer->max_depth, spall_buffer->current_depth);
-
     size_t ev_size = sizeof(SpallMicroBeginEventMax);
     if ((spall_buffer->head + ev_size) > spall_buffer->sub_length) {
         if (!spall_auto_buffer_flush()) {
             return false;
         }
     }
+
+    spall_buffer->current_depth += 1;
+    spall_buffer->max_depth = SPALL_MAX(spall_buffer->max_depth, spall_buffer->current_depth);
 
     size_t data_start = spall_buffer->write_half ? spall_buffer->sub_length : 0;
     uint8_t *ev_buffer = (spall_buffer->data + data_start) + spall_buffer->head;
@@ -608,7 +610,6 @@ SPALL_FN SPALL_FORCEINLINE bool spall_buffer_micro_begin(uint64_t addr, uint64_t
 
 SPALL_FN SPALL_FORCEINLINE bool spall_buffer_micro_end(void) {
     uint64_t now = spall_get_clock();
-    spall_buffer->current_depth -= 1;
 
     size_t ev_size = sizeof(SpallMicroEndEventMax);
     if ((spall_buffer->head + ev_size) > spall_buffer->sub_length) {
@@ -616,6 +617,8 @@ SPALL_FN SPALL_FORCEINLINE bool spall_buffer_micro_end(void) {
             return false;
         }
     }
+
+    spall_buffer->current_depth -= 1;
     if (spall_buffer->first_ts == 0) {
         spall_buffer->first_ts = now;
         spall_buffer->previous_ts = now;
@@ -641,10 +644,6 @@ SPALL_FN SPALL_FORCEINLINE bool spall_buffer_micro_end(void) {
 }
 
 SPALL_NOINSTRUMENT SPALL_FORCEINLINE bool spall_auto_buffer_begin(const char *name, signed long name_len, const char *args, signed long args_len) {
-
-    spall_buffer->current_depth += 1;
-    spall_buffer->max_depth = SPALL_MAX(spall_buffer->max_depth, spall_buffer->current_depth);
-
     uint16_t trunc_name_len = (uint16_t)SPALL_MIN(name_len, UINT16_MAX);
     uint16_t trunc_args_len = (uint16_t)SPALL_MIN(args_len, UINT16_MAX);
     uint64_t name_len_size = (trunc_name_len > 255) ? 2 : 1;
@@ -656,6 +655,9 @@ SPALL_NOINSTRUMENT SPALL_FORCEINLINE bool spall_auto_buffer_begin(const char *na
             return false;
         }
     }
+
+    spall_buffer->current_depth += 1;
+    spall_buffer->max_depth = SPALL_MAX(spall_buffer->max_depth, spall_buffer->current_depth);
 
     size_t data_start = spall_buffer->write_half ? spall_buffer->sub_length : 0;
     uint8_t *ev_buffer = (spall_buffer->data + data_start) + spall_buffer->head;
