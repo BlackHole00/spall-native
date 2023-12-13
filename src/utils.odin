@@ -655,10 +655,10 @@ add_event :: #force_inline proc(depth: ^Depth, has_addr: bool, ts: i64, id, args
 	)
 
 	i := u64(depth.event_cursor)
-	mem.copy(raw_data(depth.events[i:]), &ev_tag,  size_of(u16)); i += size_of(u16)
-	mem.copy(raw_data(depth.events[i:]), &ts_dt,   8); i += ts_dt_size
-	mem.copy(raw_data(depth.events[i:]), &id_dt,   8); i += id_dt_size
-	mem.copy(raw_data(depth.events[i:]), &args_dt, 8); i += args_dt_size
+	mem.copy_non_overlapping(raw_data(depth.events[i:]), &ev_tag,  size_of(u16)); i += size_of(u16)
+	mem.copy_non_overlapping(raw_data(depth.events[i:]), &ts_dt,   8); i += ts_dt_size
+	mem.copy_non_overlapping(raw_data(depth.events[i:]), &id_dt,   8); i += id_dt_size
+	mem.copy_non_overlapping(raw_data(depth.events[i:]), &args_dt, 8); i += args_dt_size
 
 	depth.last_ts   = ts
 	depth.last_id   = id
@@ -698,12 +698,12 @@ update_event :: #force_inline proc(depth: ^Depth, end_ts: i64) -> i64 {
 	update_arr_len(&evs, int(ev_size))
 
 	i := u64(depth.event_cursor) + size_of(u16) + dt_size + id_size + args_size
-	mem.copy(raw_data(evs[i:]), &dur_dt,  8); i += dur_dt_size
+	mem.copy_non_overlapping(raw_data(evs[i:]), &dur_dt,  8); i += dur_dt_size
 	if has_self_time {
-		mem.copy(raw_data(evs[i:]), &self_dt, 8); i += self_dt_size
+		mem.copy_non_overlapping(raw_data(evs[i:]), &self_dt, 8); i += self_dt_size
 	}
 
-	mem.copy(raw_data(evs[depth.event_cursor:]), &new_type_bytes,  size_of(u16));
+	mem.copy_non_overlapping(raw_data(evs[depth.event_cursor:]), &new_type_bytes,  size_of(u16));
 
 	depth.events        = evs
 	depth.last_duration = duration

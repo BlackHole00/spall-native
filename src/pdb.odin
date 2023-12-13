@@ -251,13 +251,13 @@ linearize_stream :: proc(data: []u8, indices: []u32, block_size: u32, stream_siz
 	copy_offset : u32 = 0
 	for i : u32 = 0; i < full_block_count; i += 1 {
 		data_offset := indices[i] * block_size
-		mem.copy(raw_data(linear_space[copy_offset:]), raw_data(data[data_offset:]), int(block_size))
+		mem.copy_non_overlapping(raw_data(linear_space[copy_offset:]), raw_data(data[data_offset:]), int(block_size))
 		copy_offset += block_size
 	}
 
 	if leftovers > 0 {
 		data_offset := indices[block_count - 1] * block_size
-		mem.copy(raw_data(linear_space[copy_offset:]), raw_data(data[data_offset:]), int(leftovers))
+		mem.copy_non_overlapping(raw_data(linear_space[copy_offset:]), raw_data(data[data_offset:]), int(leftovers))
 	}
 
 	return linear_space
