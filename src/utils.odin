@@ -681,7 +681,7 @@ update_event :: #force_inline proc(depth: ^Depth, end_ts: i64) -> i64 {
 	evs := depth.events
 
 	new_type_bytes := pull_uval_16(evs[depth.event_cursor:])
-	new_type_bytes = (1 << 14) | (u64(has_self_time) << 13) | u64(dur_dt_bits << 5) | u64(self_dt_bits << 3)
+	new_type_bytes = new_type_bytes | (1 << 14) | (u64(has_self_time) << 13) | u64(dur_dt_bits << 5) | u64(self_dt_bits << 3)
 
 	ts_dt_bits   := u64((0b0001_1000_0000_0000 & new_type_bytes) >> 11)
 	id_dt_bits   := u64((0b0000_0110_0000_0000 & new_type_bytes) >>  9)
@@ -710,4 +710,34 @@ update_event :: #force_inline proc(depth: ^Depth, end_ts: i64) -> i64 {
 	depth.last_selftime = self_time
 	depth.event_cursor  = i64(i)
 	return duration
+}
+
+get_event :: proc(depth: ^Depth, ev_off: i64) -> DtEvent {
+    evs := depth.events
+    i := ev_off
+    type_bytes := pull_uval_16(evs[i:]); i += size_of(u16)
+    
+    ev := DtEvent{}
+    ev.has_addr     = bool((0b1000_0000_0000_0000 & type_bytes) >> 15)
+    ev.has_duration = bool((0b0100_0000_0000_0000 & type_bytes) >> 14)
+    ev.has_selftime = bool((0b0010_0000_0000_0000 & type_bytes) >> 13)
+
+    ts_size   := i64(1 << (((0b0001_1000_0000_0000 & type_bytes) >> 11) & 63))
+    id_size   := i64(1 << (((0b0000_0110_0000_0000 & type_bytes) >>  9) & 63))
+    args_size := i64(1 << (((0b0000_0001_1000_0000 & type_bytes) >>  7) & 63))
+    dur_size  := i64(1 << (((0b0000_0000_0110_0000 & type_bytes) >>  5) & 63))
+    self_size := i64(1 << (((0b0000_0000_0001_1000 & type_bytes) >>  3) & 63))
+
+    mem.copy_non_overlapping(&ev.d_timestamp, raw_data(evs[i:]), int(ts_size));   i += ts_size
+    mem.copy_non_overlapping(&ev.d_id,        raw_data(evs[i:]), int(id_size));   i += id_size
+    mem.copy_non_overlapping(&ev.d_args,      raw_data(evs[i:]), int(args_size)); i += args_size
+    if ev.has_duration {
+        mem.copy_non_overlapping(&ev.d_duration, raw_data(evs[i:]), int(dur_size)); i += dur_size
+
+        if ev.has_selftime {
+            mem.copy_non_overlapping(&ev.d_self_time, raw_data(evs[i:]), int(self_size));
+        }
+    }
+
+    return ev
 }

@@ -44,43 +44,43 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 
     switch type_tag {
         case 0: // MicroBegin
-		dt_size     := i64(1 << (((0b00_11_00_00 & type_byte) >> 4) & 63))
-		addr_size   := i64(1 << (((0b00_00_11_00 & type_byte) >> 2) & 63))
-		caller_size := i64(1 << ((0b00_00_00_11 & type_byte) & 63))
-		event_sz := 1 + dt_size + addr_size + caller_size
-		if chunk_pos(p) + event_sz > i64(len(chunk)) {
-			return .PartialRead
-		}
+            dt_size     := i64(1 << (((0b00_11_00_00 & type_byte) >> 4) & 63))
+            addr_size   := i64(1 << (((0b00_00_11_00 & type_byte) >> 2) & 63))
+            caller_size := i64(1 << ((0b00_00_00_11 & type_byte) & 63))
+            event_sz := 1 + dt_size + addr_size + caller_size
+            if chunk_pos(p) + event_sz > i64(len(chunk)) {
+                return .PartialRead
+            }
 
-		i : i64 = 1
-		dt       := pull_uval(chunk[chunk_pos(p)+i:], int(dt_size));     i += dt_size
-		d_addr   := pull_uval(chunk[chunk_pos(p)+i:], int(addr_size));   i += addr_size
-		d_caller := pull_uval(chunk[chunk_pos(p)+i:], int(caller_size)); i += caller_size
+            i : i64 = 1
+            dt       := pull_uval(chunk[chunk_pos(p)+i:], int(dt_size));     i += dt_size
+            d_addr   := pull_uval(chunk[chunk_pos(p)+i:], int(addr_size));   i += addr_size
+            d_caller := pull_uval(chunk[chunk_pos(p)+i:], int(caller_size)); i += caller_size
 
-		state.current_time   += i64(dt)
-		state.current_addr   ~= d_addr
-		state.current_caller ~= d_caller
+            state.current_time   += i64(dt)
+            state.current_addr   ~= d_addr
+            state.current_caller ~= d_caller
 
-		id := state.current_addr
-		caller := state.current_caller
-		timestamp := state.current_time
+            id := state.current_addr
+            caller := state.current_caller
+            timestamp := state.current_time
 
-		if thread.max_time > timestamp {
-			post_error(trace,
-			    "Woah, time-travel? You just had a begin event that started before a previous one; [pid: %d, tid: %d, addr: 0x%x, event_count: %d]",
-			    0, thread.id, id, trace.event_count)
-			return .Failure
-		}
-		thread.max_time  = timestamp
+            if thread.max_time > timestamp {
+                post_error(trace,
+                    "Woah, time-travel? You just had a begin event that started before a previous one; [pid: %d, tid: %d, addr: 0x%x, event_count: %d]",
+                    0, thread.id, id, trace.event_count)
+                return .Failure
+            }
+            thread.max_time  = timestamp
 
-		depth := &thread.depths[thread.current_depth]
-		thread.current_depth += 1
+            depth := &thread.depths[thread.current_depth]
+            thread.current_depth += 1
 
-		add_event(depth, true, timestamp, id, caller)
-		trace.event_count += 1
+            add_event(depth, true, timestamp, id, caller)
+            trace.event_count += 1
 
-		p.pos += event_sz
-		return .EventRead
+            p.pos += event_sz
+            return .EventRead
         case 2: // Other Events
             type := spall_fmt.Auto_Event_Type((0b00_11_00_00 & type_byte) >> 4)
             #partial switch type {
@@ -154,15 +154,16 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 			}
 		}
 
-		state.current_time = ts
-		p.pos += event_sz
-		return .EventRead
-        case:
-		post_error(trace, "Invalid event type: %d in file!", data_start[0])
-		return .Failure
-	}
+        state.current_time = ts
+        p.pos += event_sz
+        return .EventRead
 
-	return .PartialRead
+    case:
+        post_error(trace, "Invalid event type: %d in file!", data_start[0])
+        return .Failure
+    }
+
+    return .PartialRead
 }
 
 as_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
@@ -241,69 +242,80 @@ as_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 				p.offset = p.pos
 
 				rd_sz, ok := get_chunk(p, fd, chunk_buffer)
-				if !ok {
-					post_error(trace, "Failed to read file!")
-					return false
-				}
+                if !ok {
+                    post_error(trace, "Failed to read file!")
+                    return false
+                }
 
-				full_chunk = chunk_buffer[:rd_sz]
-				continue ev_loop
-			case .Failure:
-				return false
-			}
-		}
-	}
+                full_chunk = chunk_buffer[:rd_sz]
+                continue ev_loop
+            case .Failure:
+                return false
+            }
+        }
+    }
 
-	// cleanup unfinished events
-	/*
-	for process in &trace.processes {
-		for thread in &process.threads {
-			assert(thread.bande_q.len == thread.current_depth)
-			for thread.current_depth > 0 {
-				jev_idx := stack_pop_back(&thread.bande_q)
-				thread.current_depth -= 1
-				ev_depth := thread.current_depth
+    // cleanup unfinished events
+    /*
+    for process in &trace.processes {
+        for thread in &process.threads {
+            assert(thread.bande_q.len == thread.current_depth)
+            for thread.current_depth > 0 {
+                jev_idx := stack_pop_back(&thread.bande_q)
+                thread.current_depth -= 1
+                ev_depth := thread.current_depth
 
-				depth := &thread.depths[ev_depth]
-				jev := &depth.events[jev_idx]
+                depth := &thread.depths[ev_depth]
+                jev := &depth.events[jev_idx]
 
-				thread.max_time = max(thread.max_time, jev.timestamp)
-				trace.total_max_time = max(trace.total_max_time, jev.timestamp)
+                thread.max_time = max(thread.max_time, jev.timestamp)
+                trace.total_max_time = max(trace.total_max_time, jev.timestamp)
 
-				duration := bound_duration(jev, thread.max_time)
-				jev.self_time = duration - jev.self_time
-				jev.self_time = max(jev.self_time, 0)
+                duration := bound_duration(jev, thread.max_time)
+                jev.self_time = duration - jev.self_time
+                jev.self_time = max(jev.self_time, 0)
 
-				if thread.current_depth > 0 {
-					parent_depth := &thread.depths[ev_depth - 1]
-					parent_ev_idx := stack_peek_back(&thread.bande_q)
+                if thread.current_depth > 0 {
+                    parent_depth := &thread.depths[ev_depth - 1]
+                    parent_ev_idx := stack_peek_back(&thread.bande_q)
 
-					pev := &parent_depth.events[parent_ev_idx]
-					pev.self_time += duration
-					pev.self_time = max(pev.self_time, 0)
-				}
-			}
-		}
-	}
-	*/
+                    pev := &parent_depth.events[parent_ev_idx]
+                    pev.self_time += duration
+                    pev.self_time = max(pev.self_time, 0)
+                }
+            }
+        }
+    }
+    */
 
-	event_mem : i64 = 0
-	overhead_mem : i64 = 0
-	for process in &trace.processes {
-		for thread in &process.threads {
-			for depth in thread.depths {
-				event_mem += depth.event_cursor
-				overhead_mem += size_of(Depth)
-			}
-			overhead_mem += size_of(Thread)
-		}
-		overhead_mem += size_of(Process)
-	}
-	fmt.printf("used %v MB for events!\n", f64(event_mem) / 1024 / 1024)
-	fmt.printf("used %v MB for org overhead!\n", f64(overhead_mem) / 1024 / 1024)
-	fmt.printf("Loaded %s events!\n", tens_fmt(trace.event_count))
-	fmt.printf("Average Event Size: %v bytes\n", f64(event_mem) / f64(trace.event_count))
+    event_mem : i64 = 0
+    overhead_mem : i64 = 0
+    max_start : i64 = 0
+    min_start : i64 = 0
+    for process in &trace.processes {
+        for thread in &process.threads {
+            for depth in &thread.depths {
+                event_mem += depth.event_cursor
+                overhead_mem += size_of(Depth)
 
-	if true { os.exit(0) }
-	return true
+                /*
+                    if len(depth.events) == 0 {
+                        fmt.printf("skipping empty!\n")
+                        continue
+                    }
+                    first := get_event(&depth, 0)
+                    fmt.printf("ev: %v\n", first)
+                */
+            }
+            overhead_mem += size_of(Thread)
+        }
+        overhead_mem += size_of(Process)
+    }
+    fmt.printf("used %v MB for events!\n", f64(event_mem) / 1024 / 1024)
+    fmt.printf("used %v MB for org overhead!\n", f64(overhead_mem) / 1024 / 1024)
+    fmt.printf("Loaded %s events!\n", tens_fmt(trace.event_count))
+    fmt.printf("Average Event Size: %v bytes\n", f64(event_mem) / f64(trace.event_count))
+
+    if true { os.exit(0) }
+    return true
 }
