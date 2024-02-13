@@ -648,6 +648,12 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 	case .Json:
 		parsed_properly = json_parse(trace, trace_fd)
 	}
+
+	if p.pos == i64(header_size) {
+		parsed_properly = false
+		post_error(trace, "Trace is empty, did you remember to quit your threads?")
+	}
+
 	free_trace_temps(trace)
 	if !parsed_properly {
 		error_temp := trace.error_storage
