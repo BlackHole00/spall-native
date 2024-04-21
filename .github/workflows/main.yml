@@ -119,7 +119,7 @@ jobs:
       - name: Build Odin
         run: |
           cd odin
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
           ./build.bat
           Add-Content $env:GITHUB_PATH (Get-Item .).FullName
         
