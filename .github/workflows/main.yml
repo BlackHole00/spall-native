@@ -19,8 +19,8 @@ jobs:
         run: |
           cd odin
           ./build_odin.sh
+          echo "$(pwd)/odin" >> $GITHUB_PATH
         
       - name: Build Spall
         run: |
-          echo "$(pwd)/odin" >> $GITHUB_PATH
           ./build.sh release
