@@ -10,9 +10,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Odin-lang/odin
+          path: odin
 
       - name: Build Odin
         run: |
+          cd odin
           ./build_odin.sh
 
       - name: Build Spall
