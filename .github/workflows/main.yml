@@ -30,7 +30,7 @@ jobs:
           ./build.sh release
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v1
+        uses: actions/upload-artifact@v4
         with:
           name: linux_artifacts
           path: bin
@@ -64,7 +64,7 @@ jobs:
           ./build.sh release
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v1
+        uses: actions/upload-artifact@v4
         with:
           name: osx_x86_artifacts
           path: bin
@@ -98,7 +98,7 @@ jobs:
           ./build.sh release
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v1
+        uses: actions/upload-artifact@v4
         with:
           name: osx_arm_artifacts
           path: bin
@@ -129,7 +129,7 @@ jobs:
           ./build.bat release
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v1
+        uses: actions/upload-artifact@v4
         with:
           name: windows_artifacts
           path: bin
