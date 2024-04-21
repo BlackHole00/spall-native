@@ -8,7 +8,7 @@ jobs:
     steps:
       - name: Grab Spall Dependencies
         run: |
-          sudo apt install libsdl2-dev libsdl2_ttf-dev
+          sudo apt install libsdl2-dev libsdl2-ttf-dev
     
       - name: Checkout Spall
         uses: actions/checkout@v4
