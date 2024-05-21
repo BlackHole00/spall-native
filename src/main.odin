@@ -223,6 +223,7 @@ threaded_config_load :: proc(pool: ^Pool, data: rawptr) {
 	ui_state.post_loading = true
 }
 
+
 load_config :: proc(pool: ^Pool, trace: ^Trace, ui_state: ^UIState) -> bool {
 	if ui_state.loading_config {
 		return false
@@ -238,6 +239,10 @@ load_config :: proc(pool: ^Pool, trace: ^Trace, ui_state: ^UIState) -> bool {
 		trace = trace,
 		ui_state = ui_state,
 	}
+	// FIXME(will) turn start_trace into a function 
+	// start_trace gets set from a few places, namely 
+	// DROPFILE events, then in the draw_trace function
+	// it checks if start_trace is non
 	start_trace = ""
 
 	pool_add_task(pool, Pool_Task{threaded_config_load, state})
@@ -593,6 +598,13 @@ main :: proc() {
 						strings.builder_reset(&selected_box.b)
 						strings.write_string(&selected_box.b, path)
 						selected_box.cursor = len(selected_box.b.buf)
+					}
+				case .R:
+					if trace.file_name != "" && !capture_text && ctrl_down && !ui_state.loading_config {
+						fmt.printf("attempting to load %s\n", trace.file_name)
+						start_trace = trace.file_name
+						// NOTE(will) maybe necessary?
+						ui_state.ui_mode = .TraceView
 					}
 				}
 			case .KEYUP:
