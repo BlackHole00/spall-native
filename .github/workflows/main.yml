@@ -37,7 +37,7 @@ jobs:
 
   build_osx_x86:
     name: OSX x86 Build and Test
-    runs-on: macos-latest
+    runs-on: macos-13
     steps:
       - name: Grab Spall Dependencies
         run: |
