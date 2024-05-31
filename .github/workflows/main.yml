@@ -29,6 +29,7 @@ jobs:
       - name: Build Spall
         run: |
           ./build.sh release
+          strip bin/spall
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
