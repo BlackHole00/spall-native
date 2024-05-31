@@ -150,6 +150,7 @@ get_event :: proc(trace: ^Trace, ev_id: EventID) -> ^Event {
 
 
 load_font :: proc(rw: ^SDL.RWops, size: i32) -> (^SDL_TTF.Font, bool) {
+	fmt.printf("fontsize %v\n", size)
 	font := SDL_TTF.OpenFontRW(rw, true, size)
 	if font == nil {
 		return nil, false
