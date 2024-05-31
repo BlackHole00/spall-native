@@ -8,7 +8,7 @@ jobs:
     steps:
       - name: Grab Spall Dependencies
         run: |
-          sudo apt install libsdl2-dev libsdl2-ttf-dev
+          sudo apt install libsdl2-dev
     
       - name: Checkout Spall
         uses: actions/checkout@v4
@@ -41,7 +41,7 @@ jobs:
     steps:
       - name: Grab Spall Dependencies
         run: |
-          brew install sdl2 sdl2_ttf llvm@17
+          brew install sdl2 llvm@17
           echo "/usr/local/opt/llvm@17/bin" >> $GITHUB_PATH
     
       - name: Checkout Spall
@@ -75,7 +75,7 @@ jobs:
     steps:
       - name: Grab Spall Dependencies
         run: |
-          brew install sdl2 sdl2_ttf llvm@17
+          brew install sdl2 llvm@17
           echo "/opt/homebrew/opt/llvm@17/bin" >> $GITHUB_PATH
     
       - name: Checkout Spall
