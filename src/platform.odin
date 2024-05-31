@@ -8,8 +8,9 @@ import "core:time"
 import "core:unicode/utf8"
 
 import SDL "vendor:sdl2"
-import SDL_TTF "vendor:sdl2/ttf"
 import gl "vendor:OpenGL"
+
+import stbtt "vendor:stb/truetype"
 
 mouse_down :: proc(x, y: f64) {
 	is_mouse_down = true
@@ -116,10 +117,6 @@ reset_cursor :: proc() {
 	is_hovering = false
 }
 
-get_font :: proc(scale: FontSize, font_type: FontType) -> ^SDL_TTF.Font {
-	font_idx := (u32(font_type) * u32(FontSize.LastSize)) + u32(scale)
-	return all_fonts[font_idx]
-}
 
 get_text_height :: proc(scale: FontSize, font: FontType) -> f64 { 
 	#partial switch scale {
@@ -142,7 +139,6 @@ cache_hits_this_frame := 0
 cache_misses_this_frame := 0
 
 
-import stbtt "vendor:stb/truetype"
 font_map: [FontType.LastFont]stbtt.fontinfo
 font_temp : [256*256]u8
 font_size : [FontSize.LastSize]f32

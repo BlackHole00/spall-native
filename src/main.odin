@@ -20,7 +20,6 @@ import glm "core:math/linalg/glsl"
 import SDL "vendor:sdl2"
 import gl "vendor:OpenGL"
 
-import SDL_TTF "vendor:sdl2/ttf"
 import stbtt "vendor:stb/truetype"
 
 // input state
@@ -76,8 +75,6 @@ h1_font_size: f64 = h1_height
 h2_font_size: f64 = h2_height
 ch_width:   f64 = 0
 thread_gap: f64 = 8
-
-all_fonts: []^SDL_TTF.Font
 
 build_hash := 0
 enable_debug := false
@@ -148,57 +145,6 @@ get_event :: proc(trace: ^Trace, ev_id: EventID) -> ^Event {
 	return &trace.processes[p_idx].threads[t_idx].depths[d_idx].events[e_idx]
 }
 
-
-load_font :: proc(rw: ^SDL.RWops, size: i32) -> (^SDL_TTF.Font, bool) {
-	font := SDL_TTF.OpenFontRW(rw, true, size)
-	if font == nil {
-		return nil, false
-	}
-
-	SDL_TTF.SetFontHinting(font, SDL_TTF.HINTING_NORMAL)
-	return font, true
-}
-
-grab_dynamic_fonts :: proc(names: []string, sizes: []f64) -> []^SDL_TTF.Font {
-	start_cstr := SDL.GetBasePath()
-	path_str := strings.clone_from_cstring(start_cstr)
-	fonts := make([dynamic]^SDL_TTF.Font)
-
-	for filename in names {
-		full_path := strings.concatenate([]string{path_str, filename})
-		full_path_cstring := strings.clone_to_cstring(full_path)
-
-		rw := SDL.RWFromFile(full_path_cstring, "rb")
-		for size in sizes {
-			font, ok := load_font(rw, i32(size))
-			if !ok {
-				fmt.printf("Failed to open %s @ %f\n", full_path_cstring, size)
-				push_fatal(SpallError.Bug)
-			}
-			append(&fonts, font)
-		}
-	}
-
-	return fonts[:]
-}
-
-grab_static_fonts :: proc(font_buffers: [][]u8, sizes: []f64) -> []^SDL_TTF.Font {
-	fonts := make([dynamic]^SDL_TTF.Font)
-
-	for font_buffer in font_buffers {
-		rw := SDL.RWFromConstMem(raw_data(font_buffer), i32(len(font_buffer)))
-		for size in sizes {
-			font, ok := load_font(rw, i32(size))
-			if !ok {
-				fmt.printf("Failed to open a compiled font @ size: %f?\n", size)
-				push_fatal(SpallError.Bug)
-			}
-			append(&fonts, font)
-		}
-	}
-
-	return fonts[:]
-}
 
 ThreadFileLoadState :: struct {
 	filename: string,
@@ -328,7 +274,6 @@ main :: proc() {
 	set_color_mode(false, true)
 
 	SDL.Init({.VIDEO})
-	SDL_TTF.Init()
 
 	GL_VERSION_MAJOR :: 3
 	GL_VERSION_MINOR :: 3
@@ -416,7 +361,6 @@ main :: proc() {
 	icon_font := #load("../fonts/fontawesome-webfont.ttf")
 	fonts := [][]u8{ sans_font, mono_font, icon_font }
 	sizes := []f64{ p_height * dpr, h1_height * dpr, h2_height * dpr }
-	all_fonts = grab_static_fonts(fonts, sizes)
 
 	stbtt.InitFont(&font_map[FontType.DefaultFont], raw_data(sans_font), 0)
 	stbtt.InitFont(&font_map[FontType.MonoFont], raw_data(mono_font), 0)
