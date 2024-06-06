@@ -8,7 +8,7 @@ jobs:
     steps:
       - name: Grab Spall Dependencies
         run: |
-            apt install libxcursor-dev libegl-dev
+            sudo apt install libxcursor-dev libegl-dev
 
       - name: Checkout Spall
         uses: actions/checkout@v4
