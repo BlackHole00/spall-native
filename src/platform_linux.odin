@@ -29,6 +29,20 @@ GFX_Context :: struct {
 	net_wm_name:             xlib.Atom,
 	net_wm_icon_name:        xlib.Atom,
 
+	dnd_enter:     xlib.Atom,
+	dnd_position:  xlib.Atom,
+	dnd_selection: xlib.Atom,
+	dnd_status:      xlib.Atom,
+	dnd_finished:    xlib.Atom,
+	dnd_action_copy: xlib.Atom,
+	dnd_drop:        xlib.Atom,
+	dnd_type_list:   xlib.Atom,
+	text_uri_list:   xlib.Atom,
+
+	dnd_version: int,
+	dnd_src_window: xlib.Window,
+	dnd_format: xlib.Atom,
+
 	rects:      [dynamic]DrawRect,
 	text_rects: [dynamic]TextRect,
 }
@@ -260,12 +274,24 @@ create_context :: proc(title: cstring, width, height: int) -> (GFX_Context, f64,
 
 	wm_proto                := xlib.InternAtom(dpy, "WM_PROTOCOLS", false)
 	delete_win              := xlib.InternAtom(dpy, "WM_DELETE_WINDOW", false)
+	xlib.SetWMProtocols(dpy, window, &delete_win, 1)
+
 	utf8_string             := xlib.InternAtom(dpy, "UTF8_STRING", false)
 	net_wm_name             := xlib.InternAtom(dpy, "_NET_WM_NAME", false)
 	net_wm_icon_name        := xlib.InternAtom(dpy, "_NET_WM_ICON_NAME", false)
 	net_wm_state            := xlib.InternAtom(dpy, "_NET_WM_STATE", false)
 	net_wm_state_fullscreen := xlib.InternAtom(dpy, "_NET_WM_STATE_FULLSCREEN", false)
-	xlib.SetWMProtocols(dpy, window, &delete_win, 1)
+
+	dnd_aware               := xlib.InternAtom(dpy, "XdndAware", false)
+	dnd_enter               := xlib.InternAtom(dpy, "XdndEnter", false)
+	dnd_position            := xlib.InternAtom(dpy, "XdndPosition", false)
+	dnd_status              := xlib.InternAtom(dpy, "XdndStatus", false)
+	dnd_action_copy         := xlib.InternAtom(dpy, "XdndActionCopy", false)
+	dnd_drop                := xlib.InternAtom(dpy, "XdndDrop", false)
+	dnd_finished            := xlib.InternAtom(dpy, "XdndFinished", false)
+	dnd_selection           := xlib.InternAtom(dpy, "XdndSelection", false)
+	dnd_type_list           := xlib.InternAtom(dpy, "XdndTypeList", false)
+	text_uri_list           := xlib.InternAtom(dpy, "text/uri-list", false)
 
 	xlib.StoreName(dpy, window, title)
 	xlib.MapRaised(dpy, window)
@@ -360,6 +386,9 @@ create_context :: proc(title: cstring, width, height: int) -> (GFX_Context, f64,
 
 	_create_cursors(dpy)
 
+	version := 5
+	xlib.ChangeProperty(dpy, window, dnd_aware, xlib.XA_ATOM, 32, xlib.PropModeReplace, rawptr(&version), 1)
+
 	dpr := f64(_get_dpi(dpy) / 96.0)
 
 	gfx.x_display = dpy
@@ -372,6 +401,15 @@ create_context :: proc(title: cstring, width, height: int) -> (GFX_Context, f64,
 	gfx.wm_protos = wm_proto
 	gfx.net_wm_state = net_wm_state
 	gfx.net_wm_state_fullscreen = net_wm_state_fullscreen
+
+	gfx.dnd_enter     = dnd_enter
+	gfx.dnd_position  = dnd_position
+	gfx.dnd_selection = dnd_selection
+	gfx.dnd_finished  = dnd_finished
+	gfx.dnd_drop      = dnd_drop
+	gfx.dnd_action_copy = dnd_action_copy
+	gfx.dnd_type_list   = dnd_type_list
+	gfx.text_uri_list   = text_uri_list
 
 	gfx.utf8_string = utf8_string
 	gfx.net_wm_name = net_wm_name
@@ -391,6 +429,49 @@ _resolve_key :: proc(x_display: ^xlib.Display, keycode: u8) -> KeyType {
 	return key
 }
 
+_x11_get_window_property :: proc(gfx: ^GFX_Context, window: xlib.Window, property: xlib.Atom, type: xlib.Atom, val: ^rawptr) -> uint {
+	data : rawptr
+	actual_type: xlib.Atom
+	actual_fmt: i32
+	item_count, bytes_after: uint
+
+	xlib.GetWindowProperty(
+		gfx.x_display,
+		window, 
+		property,
+		0, 
+		max(int),
+		false,
+		type,
+		&actual_type,
+		&actual_fmt,
+		&item_count, 
+		&bytes_after,
+		&data,
+	)
+
+	val^ = data
+	return item_count
+}
+
+parse_dropped_files_list :: proc(data: cstring) -> string {
+	file_list := strings.clone_from_cstring(data)
+	files_iter := file_list
+	path: string
+	for str in strings.split_lines_iterator(&files_iter) {
+		prefix := "file://"
+		if !strings.has_prefix(str, prefix) {
+			fmt.printf("Invalid file path?\n")
+			os.exit(1)
+		}
+
+		path = strings.clone(str[len(prefix):])
+		break
+	}
+
+	delete(file_list)
+	return path
+}
 
 get_next_event :: proc(gfx: ^GFX_Context, wait: bool) -> PlatformEvent {
 	if xlib.Pending(gfx.x_display) == 0 {
@@ -402,11 +483,84 @@ get_next_event :: proc(gfx: ^GFX_Context, wait: bool) -> PlatformEvent {
 	xlib.NextEvent(gfx.x_display, &event)
 	#partial switch event.type {
 		case .ClientMessage: {
-			if event.xclient.message_type == gfx.wm_protos {
-				protocol := event.xclient.data.l[0]
-				if xlib.Atom(protocol) == gfx.delete_win {
-					return PlatformEvent{type = .Exit}
+			switch event.xclient.message_type {
+				case gfx.wm_protos: {
+					protocol := event.xclient.data.l[0]
+					if xlib.Atom(protocol) == gfx.delete_win {
+						return PlatformEvent{type = .Exit}
+					}
 				}
+				case gfx.dnd_enter: {
+					src_win := xlib.Window(event.xclient.data.l[0])
+					is_list := 0 != (event.xclient.data.l[1] & 0b1)
+					version := event.xclient.data.l[1] >> 24
+
+					fmts: rawptr
+					count: uint
+					if is_list {
+						count = _x11_get_window_property(gfx, src_win, gfx.dnd_type_list, xlib.XA_ATOM, &fmts)
+					} else {
+						count = 3
+						fmts = rawptr(&event.xclient.data.l[2])
+					}
+
+					if fmts != nil {
+						raw_fmts_arr := slice.bytes_from_ptr(fmts, size_of(xlib.Atom))
+						fmts_arr := transmute([]xlib.Atom)raw_fmts_arr
+						for format in fmts_arr {
+							if format == gfx.text_uri_list {
+								gfx.dnd_format = format
+								break
+							}
+						}
+					}
+
+					if is_list && fmts != nil {
+						xlib.Free(fmts)
+					}
+
+					gfx.dnd_src_window = src_win
+					gfx.dnd_version = version
+				}
+				case gfx.dnd_drop: {
+					time := xlib.Time(event.xclient.data.l[2])
+					xlib.ConvertSelection(gfx.x_display, gfx.dnd_selection, gfx.text_uri_list, gfx.dnd_selection, gfx.window, time)
+
+					// Confirm Drop
+					reply := xlib.XEvent{}
+					reply.type = .ClientMessage
+					reply.xclient.window = gfx.dnd_src_window
+					reply.xclient.message_type = gfx.dnd_finished
+					reply.xclient.format = 32
+					reply.xclient.data.l[0] = int(gfx.window)
+					reply.xclient.data.l[1] = 0
+					reply.xclient.data.l[2] = 0
+					xlib.SendEvent(gfx.x_display, gfx.dnd_src_window, false, {}, &reply)
+					xlib.Flush(gfx.x_display)
+				}
+			}
+		}
+		case .SelectionNotify: {
+			if event.xselection.property == gfx.dnd_selection {
+
+				data: rawptr
+				result := _x11_get_window_property(gfx, event.xselection.requestor, event.xselection.property, event.xselection.target, &data)
+
+				path := parse_dropped_files_list(cstring(data))
+
+				// Confirm Successful Transfer from Drop
+				reply := xlib.XEvent{}
+				reply.type = .ClientMessage
+				reply.xclient.window = gfx.dnd_src_window
+				reply.xclient.message_type = gfx.dnd_finished
+				reply.xclient.format = 32
+				reply.xclient.data.l[0] = int(gfx.window)
+				reply.xclient.data.l[1] = int(result)
+				reply.xclient.data.l[2] = int(gfx.dnd_action_copy)
+				xlib.SendEvent(gfx.x_display, gfx.dnd_src_window, false, {}, &reply)
+				xlib.Flush(gfx.x_display)
+
+				return PlatformEvent{type = .FileDropped, str = path}
 			}
 		}
 		case .ButtonPress: {
