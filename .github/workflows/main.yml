@@ -9,7 +9,7 @@ jobs:
       - name: Grab Spall Dependencies
         run: |
             sudo add-apt-repository 'deb http://apt.llvm.org/focal/ llvm-toolchain-focal-17 main'
-			sudo apt-get update
+            sudo apt-get update
             sudo apt install libxcursor-dev libegl-dev clang-17 llvm-17 llvm-17-dev
 
       - name: Checkout Spall
