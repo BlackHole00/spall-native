@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: © 2024 Colin Davidson <colrdavidson@gmail.com>
+// SPDX-License-Identifier: MIT
+
 #ifndef SPALL_AUTO_H
 #define SPALL_AUTO_H
 
