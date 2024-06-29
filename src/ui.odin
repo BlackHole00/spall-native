@@ -639,7 +639,7 @@ draw_flamegraphs :: proc(gfx: ^GFX_Context, trace: ^Trace, start_time, end_time:
 		rem := v1 - v2
 
 		division_ns = math.pow(10, v2)                           // multiples of 10
-		if rem < 0.3      { division_ns -= (division_ns * 0.8) } // multiples of 2
+		if      rem < 0.3 { division_ns -= (division_ns * 0.8) } // multiples of 2
 		else if rem < 0.6 { division_ns -= (division_ns / 2)   } // multiples of 5
 
 		// find the current range in ns
