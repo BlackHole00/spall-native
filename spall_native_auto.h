@@ -694,7 +694,7 @@ SPALL_NOINSTRUMENT SPALL_FORCEINLINE bool spall_auto_buffer_end(void) {
     return spall_buffer_micro_end();
 }
 
-SPALL_NOINSTRUMENT SPALL_FORCEINLINE bool (spall_auto_thread_init)(uint32_t thread_id, size_t buffer_size) {
+SPALL_NOINSTRUMENT SPALL_FORCEINLINE bool spall_auto_thread_init(uint32_t thread_id, size_t buffer_size) {
     if (buffer_size < 512) { return false; }
     if (spall_buffer != NULL) { return false; }
 
@@ -715,7 +715,7 @@ SPALL_NOINSTRUMENT SPALL_FORCEINLINE bool (spall_auto_thread_init)(uint32_t thre
     return true;
 }
 
-void (spall_auto_thread_quit)(void) {
+SPALL_NOINSTRUMENT SPALL_FORCEINLINE void spall_auto_thread_quit(void) {
     spall_thread_running = false;
     spall_auto_buffer_flush();
 

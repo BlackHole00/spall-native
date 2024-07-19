@@ -478,15 +478,25 @@ normalize_unum :: proc(attr_val: Attr_Entry) -> (u64, bool) {
 	case .ref8:
 		v, ok := attr_val.data.(u64)
 		return v, ok
+	case .ref_udata:
+		v, ok := attr_val.data.(u64)
+		assert(ok)
+		return v, ok
 
 	// Technically, this is only u32 in DWARF32...
 	case .sec_offset:
 		v, ok := attr_val.data.(u32)
+		assert(ok)
+		return u64(v), ok
+	case .ref_addr:
+		v, ok := attr_val.data.(u32)
+		assert(ok)
 		return u64(v), ok
 
 	// This should be machine-arch dependant, will break on 32-bit binaries
 	case .addr:
 		v, ok := attr_val.data.(u64)
+		assert(ok)
 		return v, ok
 
 	case:
@@ -1435,6 +1445,10 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections) -> bool {
 			// This function is incomplete
 			continue
 		}
+		if func.ranges_off != 0 {
+			// We don't handle ranges yet
+			continue
+		}
 
 		fu := Function_Unit{}
 		fu.name = func.name
@@ -1445,8 +1459,13 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections) -> bool {
 		fu.low_pc = func.low_pc
 		fu.high_pc = func.low_pc + func.high_pc
 
+		// We still have't found a name?
+		if len(fu.name) == 0 {
+			continue
+		}
+
 		symbol_addr := func.low_pc
-		symbol_name := strings.clone_from_cstring(func.name, context.temp_allocator)
+		symbol_name := strings.clone_from_cstring(fu.name, context.temp_allocator)
 		interned_symbol := in_get(&trace.intern, &trace.string_block, symbol_name)
 		am_insert(&trace.addr_map, symbol_addr, interned_symbol)
 
