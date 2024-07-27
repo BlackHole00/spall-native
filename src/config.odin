@@ -617,6 +617,7 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 		
 		trace.stamp_scale = hdr.timestamp_unit
 		trace.skew_address = hdr.known_address
+		fmt.printf("runtime address of \"spall_auto_init\": 0x%08x\n", trace.skew_address)
 
 		symbol_path := string(header_buffer[size_of(spall_fmt.Auto_Header):][:hdr.program_path_len])
 
