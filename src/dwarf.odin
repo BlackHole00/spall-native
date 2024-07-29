@@ -615,6 +615,22 @@ get_attr :: proc(attrs: []Attr_Result, id: Dw_At) -> Attr_Data {
 	return nil
 }
 
+get_attr_ref :: proc(ctx: ^DWARF_Context, attrs: []Attr_Result, id: Dw_At, cur_cu_offset: int) -> (addr: u64, ok: bool) {
+	val := get_attr(attrs[:], id)
+	if val == nil {
+		return
+	}
+
+	#partial switch v in val {
+	case dw_ref:
+		return u64(cur_cu_offset) + u64(v), true
+	case dw_ref_addr:
+		return u64(v), true
+	case:
+		return
+	}
+}
+
 get_attr_addr :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, attrs: []Attr_Result, id: Dw_At) -> (addr: u64, ok: bool) {
 	val := get_attr(attrs[:], id)
 	if val == nil {
@@ -870,7 +886,7 @@ parse_die :: proc(ctx: ^DWARF_Context, buffer: []u8, abbrevs: []Abbrev_Unit, out
 
 	abbrev_idx := abbrev_code - 1
 	if abbrev_idx < 0 || abbrev_idx > u64(len(abbrevs)) {
-		fmt.printf("Invalid AU idx\n")
+		fmt.printf("Invalid AU idx | %v\n", abbrev_idx)
 		return 0, 0, .Fail
 	}
 	au := abbrevs[abbrev_idx]
@@ -1739,6 +1755,7 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections) -> bool {
 			case .entry_point:
 				func_name := ""
 				attrs := attr_scratch[:]
+
 				func_loop: for j := 0; j < 3; j += 1 {
 					// Try grabbing name first
 					name := get_attr_str(&ctx, &cu, attrs, .name)
@@ -1749,10 +1766,8 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections) -> bool {
 					}
 
 					// Then check for abstract origin links
-					v := get_attr(attrs, .abstract_origin)
-					ref_offset, ok := v.(dw_ref)
+					new_offset, ok := get_attr_ref(&ctx, attrs, .abstract_origin, cur_cu_offset)
 					if ok {
-						new_offset := cur_cu_offset + int(ref_offset)
 						clear(&attr_scratch2)
 						_, _, status = parse_die(&ctx, sections.info[new_offset:], cu.abbrevs, &attr_scratch2)
 						if status == .Fail {
@@ -1761,15 +1776,14 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections) -> bool {
 						}
 						attrs = attr_scratch2[:]
 						if status == .Pass {
+							//fmt.printf("resolving abstract origin:\n\tnew_abbrev: %#v\n", attrs)
 							continue
 						}
 					}
 
 					// Then check for specification links
-					v = get_attr(attrs, .specification)
-					ref_offset, ok = v.(dw_ref)
+					new_offset, ok = get_attr_ref(&ctx, attrs, .specification, cur_cu_offset)
 					if ok {
-						new_offset := cur_cu_offset + int(ref_offset)
 						clear(&attr_scratch2)
 						_, _, status = parse_die(&ctx, sections.info[new_offset:], cu.abbrevs, &attr_scratch2)
 						if status == .Fail {
@@ -1778,14 +1792,15 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections) -> bool {
 						}
 						attrs = attr_scratch2[:]
 						if status == .Pass {
+							//fmt.printf("resolving specification:\n\tnew_abbrev: %#v\n", attrs)
 							continue
 						}
 					}
 				}
 				if func_name == "" {
-					fmt.printf("unresolved func?\n")
 					break
 				}
+
 
 				// determine function range
 				low_pc, ok := get_attr_addr(&ctx, &cu, attr_scratch[:], .low_pc)
@@ -1802,15 +1817,13 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections) -> bool {
 						fmt.printf("Invalid function range!\n")
 						return false
 					}
-
-					break
-				}
-
-				ranges_val := get_attr(attr_scratch[:], .ranges)
-				if ranges_val != nil {
-					low_pc, ok = parse_range_table(&ctx, &cu, ranges_val)
-					if !ok {
-						break
+				} else {
+					ranges_val := get_attr(attr_scratch[:], .ranges)
+					if ranges_val != nil {
+						low_pc, ok = parse_range_table(&ctx, &cu, ranges_val)
+						if !ok {
+							break
+						}
 					}
 				}
 

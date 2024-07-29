@@ -197,7 +197,7 @@ spall_ctx: spall.Context
 SELF_TRACE :: false
 FULL_SPEED :: false
 GOOD_BOY_MODE :: false
-terminal_mode := true
+terminal_mode := false
 main :: proc() {
 	when SELF_TRACE {
 		current_time := time.time_to_unix(time.now())
