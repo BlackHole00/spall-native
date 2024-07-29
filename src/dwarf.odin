@@ -673,7 +673,7 @@ get_attr_str :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, attrs: []Attr_Result, id
 			off_off := cu.str_offsets_base + (8 * idx)
 			if (off_off + 8) > u64(len(str_offsets)) { return "" }
 
-			off, ok := slice_to_type(str_offsets, u64)
+			off, ok := slice_to_type(str_offsets[off_off:], u64)
 			if !ok { return "" }
 
 			str := cstring(raw_data(debug_str[off:]))
@@ -684,7 +684,7 @@ get_attr_str :: proc(ctx: ^DWARF_Context, cu: ^CU_Unit, attrs: []Attr_Result, id
 			off_off := cu.str_offsets_base + (4 * idx)
 			if (off_off + 4) > u64(len(str_offsets)) { return "" }
 
-			off, ok := slice_to_type(str_offsets, u32)
+			off, ok := slice_to_type(str_offsets[off_off:], u32)
 			if !ok { return "" }
 
 			str := cstring(raw_data(debug_str[off:]))
@@ -1800,7 +1800,6 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections) -> bool {
 				if func_name == "" {
 					break
 				}
-
 
 				// determine function range
 				low_pc, ok := get_attr_addr(&ctx, &cu, attr_scratch[:], .low_pc)
