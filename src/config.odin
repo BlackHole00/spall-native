@@ -458,6 +458,12 @@ load_executable :: proc(trace: ^Trace, file_name: string) -> bool {
 			return false
 		}
 	} else if magic_chunk == MACH_MAGIC_64 {
+		ok := load_macho_symbols(trace, exec_buffer)
+		if !ok {
+			post_error(trace, "Failed to parse Mach-O!")
+			return false
+		}
+
 		file_base := filepath.base(file_name)
 		b := strings.builder_make(context.temp_allocator)
 		strings.write_string(&b, file_name)
@@ -620,7 +626,6 @@ load_file :: proc(trace: ^Trace, file_name: string) {
 		fmt.printf("runtime address of \"spall_auto_init\": 0x%08x\n", trace.skew_address)
 
 		symbol_path := string(header_buffer[size_of(spall_fmt.Auto_Header):][:hdr.program_path_len])
-
 		header_size = size_of(spall_fmt.Auto_Header) + i64(hdr.program_path_len)
 		if !load_executable(trace, symbol_path) {
 			return

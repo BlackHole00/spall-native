@@ -1626,7 +1626,7 @@ process_line_info :: proc(trace: ^Trace, ctx: ^DWARF_Context, cu_files_list: ^[d
 	return true
 }
 
-load_dwarf :: proc(trace: ^Trace, sections: ^Sections) -> bool {
+load_dwarf :: proc(trace: ^Trace, sections: ^Sections, _skew_size: u64) -> bool {
 	ctx := DWARF_Context{}
 	ctx.sections = sections
 
@@ -1642,9 +1642,12 @@ load_dwarf :: proc(trace: ^Trace, sections: ^Sections) -> bool {
 
 	init_abbrevs(&ctx, &au_offset_map)
 
-	MAX_BLOCK_STACK :: 30
 	symbol_found := false
 	skew_size : u64 = 0
+	if _skew_size != 0 {
+		symbol_found = true
+		skew_size = _skew_size
+	}
 
 	attr_scratch := make([dynamic]Attr_Result)
 	attr_scratch2 := make([dynamic]Attr_Result)
