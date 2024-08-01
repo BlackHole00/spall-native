@@ -597,3 +597,53 @@ step_right_rune :: proc(buffer: []u8, cur: int) -> int {
 	}
 	return pos
 }
+
+Stream_Context :: struct {
+	buffer: []u8,
+	idx: int,
+}
+stream_init :: proc(buffer: []u8, #any_int idx: int = 0) -> Stream_Context {
+	return Stream_Context{buffer = buffer, idx = idx}
+}
+stream_set :: proc(ctx: ^Stream_Context, idx: int, loc := #caller_location) {
+	ctx.idx = idx
+}
+stream_skip :: proc(ctx: ^Stream_Context, skip: int, loc := #caller_location) {
+	ctx.idx += skip
+}
+stream_uleb :: proc(ctx: ^Stream_Context, loc := #caller_location) -> (u64, bool) {
+	val, size, ok := #force_inline read_uleb(ctx.buffer[ctx.idx:])
+	//if !ok { panic("%s\n", loc) }
+	if !ok { return 0, false }
+
+	ctx.idx += size
+	return val, true
+}
+stream_ileb :: proc(ctx: ^Stream_Context, loc := #caller_location) -> (i64, bool) {
+	val, size, ok := #force_inline read_ileb(ctx.buffer[ctx.idx:])
+	//if !ok { panic("%s\n", loc) }
+	if !ok { return 0, false }
+
+	ctx.idx += size
+	return val, true
+}
+stream_val :: proc(ctx: ^Stream_Context, $T: typeid, loc := #caller_location) -> (T, bool) {
+	val, ok := #force_inline slice_to_type(ctx.buffer[ctx.idx:], T)
+	//if !ok { panic("%s\n", loc) }
+	if !ok { return val, false }
+
+	ctx.idx += size_of(T)
+	return val, true
+}
+stream_bytes :: proc(ctx: ^Stream_Context, #any_int sz: int, loc := #caller_location) -> ([]u8, bool) {
+	if len(ctx.buffer[ctx.idx:]) < sz { return nil, false }
+
+	buf := ctx.buffer[ctx.idx:ctx.idx+sz]
+	ctx.idx += sz
+	return buf, true
+}
+stream_cstring :: proc(ctx: ^Stream_Context, loc := #caller_location) -> (cstring, bool) {
+	str := cstring(raw_data(ctx.buffer[ctx.idx:]))
+	ctx.idx += len(str)+1
+	return str, true
+}
