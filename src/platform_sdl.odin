@@ -73,7 +73,7 @@ _resolve_key :: proc(code: SDL.Keycode) -> KeyType {
 		case .RETURN:     return .Return
 		case .TAB:        return .Tab
 		case .SPACE:      return .Space
-		case .BACKSPACE:  return .Delete
+		case .BACKSPACE:  return .Backspace
 		case .ESCAPE:     return .Escape
 		case .CAPSLOCK:   return .CapsLock
 

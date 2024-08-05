@@ -27,8 +27,8 @@ PlatformEventType :: enum {
 	Exit,
 }
 
-KeyType :: enum {
-	None,
+KeyType :: enum u8 {
+	None = 0,
 
 	A, B, C, D, E, F, G, H, I, J, K, L, M,
 	N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
@@ -43,7 +43,8 @@ KeyType :: enum {
 	Space, Tab, Return, Backspace, Delete, FwdDelete,
 
 	PageUp, PageDown, Home, End,
-	Quote, Minus, Equal, LeftBracket, RightBracket, Comma, Period, Backslash, Slash, Semicolon, Grave,
+	Minus, Equal, LeftBracket, RightBracket,
+	Comma, Period, Backslash, Slash, Semicolon, Quote, Grave,
 
 	Keypad_1, Keypad_2, Keypad_3, Keypad_4, Keypad_5, Keypad_6, Keypad_7, Keypad_8, Keypad_9, Keypad_0,
 	Keypad_Period, Keypad_Multiply, Keypad_Plus, Keypad_Clear, Keypad_Divide, Keypad_Enter, Keypad_Minus, Keypad_Equal,
@@ -72,6 +73,76 @@ PlatformEvent :: struct {
 	key: KeyType,
 	mouse: MouseButtonType,
 	str: string,
+}
+
+process_modifiers :: proc(key: KeyType, is_down: bool) {
+	#partial switch key {
+	case .LeftShift:    shift_down = is_down
+	case .RightShift:   shift_down = is_down
+	case .LeftControl:  ctrl_down = is_down
+	case .RightControl: ctrl_down = is_down
+	case .LeftAlt:      alt_down = is_down
+	case .RightAlt:     alt_down = is_down
+	case .LeftSuper:    super_down = is_down
+	case .RightSuper:   super_down = is_down
+	}
+}
+
+assign_keys :: proc(key: KeyType, a: u8, b: u8) {
+	standard_keymap[key] = a
+	shift_keymap[key] = b
+}
+
+standard_keymap := [256]u8{}
+shift_keymap    := [256]u8{}
+init_keymap :: proc() {
+	standard_keymap[0] = 0
+
+	for i := 0; i < 26; i += 1 {
+		map_slot := int(KeyType.A) + i
+		standard_keymap[map_slot] = u8(i + 'a')
+		shift_keymap[map_slot] = u8('A' + i)
+	}
+
+	for i := 0; i < 10; i += 1 {
+		map_slot := int(KeyType._0) + i
+		standard_keymap[map_slot] = u8('0' + i)
+	}
+	shift_keymap[KeyType._0] = ')'
+	shift_keymap[KeyType._1] = '!'
+	shift_keymap[KeyType._2] = '@'
+	shift_keymap[KeyType._3] = '#'
+	shift_keymap[KeyType._4] = '$'
+	shift_keymap[KeyType._5] = '%'
+	shift_keymap[KeyType._6] = '^'
+	shift_keymap[KeyType._7] = '&'
+	shift_keymap[KeyType._8] = '*'
+	shift_keymap[KeyType._9] = '('
+
+	assign_keys(.Minus,  '-', '_')
+	assign_keys(.Equal,  '=', '+')
+	assign_keys(.Backslash,  '\\', '|')
+	assign_keys(.Comma,  ',', '<')
+	assign_keys(.Period, '.', '>')
+	assign_keys(.Slash, '/', '?')
+	assign_keys(.LeftBracket, '[', '{')
+	assign_keys(.RightBracket, ']', '}')
+	assign_keys(.Quote, '\'', '"')
+	assign_keys(.Grave, '`', '~')
+	assign_keys(.Semicolon, ';', ':')
+
+	assign_keys(.Space, ' ', ' ')
+	assign_keys(.Tab, '\t', '\t')
+}
+
+capture_keys :: proc(key: KeyType, buffer: []u8) -> string {
+	if shift_down {
+		buffer[0] = shift_keymap[key]
+	} else {
+		buffer[0] = standard_keymap[key]
+	}
+
+	return string(cstring(raw_data(buffer)))
 }
 
 mouse_down :: proc(x, y: f64) {

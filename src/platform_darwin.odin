@@ -58,3 +58,31 @@ demangle_symbol :: proc(name: string, tmp_buffer: []u8) -> (string, bool) {
 
 	return string(ret_str), true
 }
+
+/*
+spawn_child :: proc(name: string, args: []string) -> bool {
+	buffer := [4096]u8{}
+	fds := [2]os.Handle{}
+	ret := unix.sys_pipe2(raw_data(&fds), 0)
+
+	pid, err := os.fork()
+	if err != os.ERROR_NONE {
+		fmt.printf("Could not find: %s!", name)
+		unix.sys_close(int(fds[0]))
+		unix.sys_close(int(fds[1]))
+		return "", false
+	}
+
+	if pid == 0 {
+		unix.sys_dup2(int(fds[1]), 1)
+		unix.sys_close(int(fds[1]))
+		unix.sys_close(int(fds[0]))
+		os.execvp(name, args)
+		os.exit(1)
+	}
+	unix.sys_close(int(fds[1]))
+
+	unix.sys_close(int(fds[0]))
+	return true
+}
+*/

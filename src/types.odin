@@ -100,6 +100,9 @@ UIState :: struct {
 	ui_mode: UIMode,
 
 	textboxes: map[TextboxKind]TextboxState,
+
+	error_message: string,
+	error_storage: [4096]u8,
 }
 
 DrawRect :: struct #packed {
@@ -318,8 +321,7 @@ Trace :: struct {
 	stats: Stats,
 	zoom_event: EventID,
 
-	error_message: string,
-	error_storage: [4096]u8,
+	ui_state: ^UIState,
 }
 
 BUCKET_SIZE :: 32

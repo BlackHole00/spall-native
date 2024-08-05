@@ -16,10 +16,10 @@ panic :: proc(fmt_in: string, args: ..any) -> ! {
 	fmt.printf(fmt_in, ..args)
 	intrinsics.trap()
 }
-post_error :: proc(trace: ^Trace, fmt_in: string, args: ..any) {
+post_error :: proc(ui_state: ^UIState, fmt_in: string, args: ..any) {
 	fmt.eprintf(fmt_in, ..args)
 	fmt.eprintf("\n")
-	trace.error_message = fmt.bprintf(trace.error_storage[:], fmt_in, ..args)
+	ui_state.error_message = fmt.bprintf(ui_state.error_storage[:], fmt_in, ..args)
 }
 
 @(cold)

@@ -67,7 +67,7 @@ ms_v1_get_next_event :: proc(trace: ^Trace, chunk: []u8, temp_ev: ^TempEvent) ->
 		p.pos += event_sz + i64(event.size)
 		return .EventRead
 	case:
-		post_error(trace, "Invalid event type: 0x%x in file, offset: 0x%x", data_start[0], p.pos)
+		post_error(trace.ui_state, "Invalid event type: 0x%x in file, offset: 0x%x", data_start[0], p.pos)
 		return .Failure
 	}
 
@@ -84,7 +84,7 @@ ms_v1_push_event :: proc(trace: ^Trace, process_id, thread_id: u32, event: ^Even
 	t := &p.threads[t_idx]
 	t.min_time = min(t.min_time, event.timestamp)
 	if t.max_time > event.timestamp {
-		post_error(trace, 
+		post_error(trace.ui_state, 
 			"Woah, time-travel? You just had a begin event that started before a previous one; [pid: %d, tid: %d, name: %s, event: %v, event_count: %d]", 
 			process_id, thread_id, in_getstr(&trace.string_block, event.id), event, trace.event_count)
 		return 0, 0, 0, false
@@ -118,7 +118,7 @@ ms_v1_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 
 	read_size, err := os.read_at(fd, chunk_buffer, 0)
 	if err != 0 {
-		post_error(trace, "Unable to read file!")
+		post_error(trace.ui_state, "Unable to read file!")
 		return false
 	}
 
@@ -140,7 +140,7 @@ ms_v1_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 
 			rd_sz, ok := get_chunk(p, fd, chunk_buffer)
 			if !ok {
-				post_error(trace, "Failed to read file!")
+				post_error(trace.ui_state, "Failed to read file!")
 				return false
 			}
 
@@ -270,7 +270,7 @@ ms_v2_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, th
 		}
 
 		if thread.max_time > ev.timestamp {
-			post_error(trace, 
+			post_error(trace.ui_state, 
 				"Woah, time-travel? You just had a begin event that started before a previous one; [pid: %d, tid: %d, name: %s, event: %v, event_count: %d]", 
 				0, thread.id, in_getstr(&trace.string_block, ev.id), ev, trace.event_count)
 			return .Failure
@@ -339,7 +339,7 @@ ms_v2_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, th
 		p.pos += event_sz + i64(event.size)
 		return .EventRead
 	case:
-		post_error(trace, "Invalid event type: 0x%x in file, offset: 0x%x", data_start[0], p.pos)
+		post_error(trace.ui_state, "Invalid event type: 0x%x in file, offset: 0x%x", data_start[0], p.pos)
 		return .Failure
 	}
 
@@ -373,7 +373,7 @@ ms_v2_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 
 	read_size, err := os.read_at(fd, chunk_buffer, 0)
 	if err != 0 {
-		post_error(trace, "Unable to read file!")
+		post_error(trace.ui_state, "Unable to read file!")
 		return false
 	}
 
@@ -394,7 +394,7 @@ ms_v2_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 
 			rd_sz, ok := get_chunk(p, fd, chunk_buffer)
 			if !ok {
-				post_error(trace, "Failed to read file!")
+				post_error(trace.ui_state, "Failed to read file!")
 				return false
 			}
 
@@ -423,7 +423,7 @@ ms_v2_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 
 				rd_sz, ok := get_chunk(p, fd, chunk_buffer)
 				if !ok {
-					post_error(trace, "Failed to read file!")
+					post_error(trace.ui_state, "Failed to read file!")
 					return false
 				}
 

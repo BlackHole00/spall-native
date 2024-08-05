@@ -449,13 +449,13 @@ load_executable :: proc(trace: ^Trace, file_name: string) -> bool {
 
 	exec_buffer, ok := os.read_entire_file_from_filename(file_name)
 	if !ok {
-		post_error(trace, "Failed to load %s!", file_name)
+		post_error(trace.ui_state, "Failed to load %s!", file_name)
 		return false
 	}
 	defer delete(exec_buffer)
 
 	if len(exec_buffer) < 4 {
-		post_error(trace, "Invalid executable file!")
+		post_error(trace.ui_state, "Invalid executable file!")
 		return false
 	}
 
@@ -463,13 +463,13 @@ load_executable :: proc(trace: ^Trace, file_name: string) -> bool {
 	if bytes.equal(exec_buffer[:4], ELF_MAGIC) {
 		ok := load_elf(trace, exec_buffer)
 		if !ok {
-			post_error(trace, "Failed to parse ELF!")
+			post_error(trace.ui_state, "Failed to parse ELF!")
 			return false
 		}
 	} else if magic_chunk == MACH_MAGIC_64 {
 		ok := load_macho_symbols(trace, exec_buffer)
 		if !ok {
-			post_error(trace, "Failed to parse Mach-O!")
+			post_error(trace.ui_state, "Failed to parse Mach-O!")
 			return false
 		}
 
@@ -482,7 +482,7 @@ load_executable :: proc(trace: ^Trace, file_name: string) -> bool {
 		debug_file_name := strings.to_string(b)
 		debug_buffer, ok2 := os.read_entire_file_from_filename(debug_file_name)
 		if !ok2 {
-			post_error(trace, "No debug info found!")
+			post_error(trace.ui_state, "No debug info found!")
 			return false
 		}
 
@@ -490,11 +490,11 @@ load_executable :: proc(trace: ^Trace, file_name: string) -> bool {
 	} else if bytes.equal(exec_buffer[:2], DOS_MAGIC) {
 		ok := load_pe32(trace, exec_buffer)
 		if !ok {
-			post_error(trace, "Failed to parse PE32!")
+			post_error(trace.ui_state, "Failed to parse PE32!")
 			return false
 		}
 	} else {
-		post_error(trace, "Unsupported executable type! %x", exec_buffer[:4])
+		post_error(trace.ui_state, "Unsupported executable type! %x", exec_buffer[:4])
 		return false
 	}
 
@@ -521,7 +521,7 @@ init_trace_allocs :: proc(trace: ^Trace, file_name: string) {
 	non_zero_append(&trace.string_block, "")
 }
 
-init_trace :: proc(trace: ^Trace) {
+init_trace :: proc(trace: ^Trace, ui_state: ^UIState) {
 	trace^ = Trace{
 		total_max_time = min(i64),
 		total_min_time = max(i64),
@@ -541,30 +541,30 @@ init_trace :: proc(trace: ^Trace) {
 		},
 
 		parser = Parser{},
-		error_message = "",
+		ui_state = ui_state,
 	}
 }
 
-load_file :: proc(loader: ^Loader, trace: ^Trace, file_name: string) {
+load_file :: proc(loader: ^Loader, trace: ^Trace, ui_state: ^UIState, file_name: string) {
 	start_time := time.tick_now()
 
-	init_trace(trace)
+	init_trace(trace, ui_state)
 	init_trace_allocs(trace, file_name)
 
 	trace_fd, err := os.open(file_name)
 	if err != 0 {
-		post_error(trace, "%s not found!", file_name)
+		post_error(trace.ui_state, "%s not found!", file_name)
 		return
 	}
 	defer os.close(trace_fd)
 
 	total_size, err2 := os.file_size(trace_fd)
 	if err2 != 0 {
-		post_error(trace, "unable to get file size!")
+		post_error(trace.ui_state, "unable to get file size!")
 		return
 	}
 	if total_size == 0 {
-		post_error(trace, "%s is empty!", file_name)
+		post_error(trace.ui_state, "%s is empty!", file_name)
 		return
 	}
 	trace.total_size = total_size
@@ -573,13 +573,13 @@ load_file :: proc(loader: ^Loader, trace: ^Trace, file_name: string) {
 	header_buffer := [0x4000]u8{}
 	rd_sz, err3 := os.read_at(trace_fd, header_buffer[:], 0)
 	if err3 != 0 {
-		post_error(trace, "Unable to read %s!", file_name)
+		post_error(trace.ui_state, "Unable to read %s!", file_name)
 		return
 	}
 
 	magic, ok := slice_to_type(header_buffer[:], u64)
 	if !ok {
-		post_error(trace, "File %s too small to be valid!", file_name)
+		post_error(trace.ui_state, "File %s too small to be valid!", file_name)
 		return
 	}
 
@@ -588,12 +588,12 @@ load_file :: proc(loader: ^Loader, trace: ^Trace, file_name: string) {
 	if magic == spall_fmt.MANUAL_MAGIC {
 		hdr, ok := slice_to_type(header_buffer[:], spall_fmt.Manual_Header)
 		if !ok {
-			post_error(trace, "%s is invalid!", file_name)
+			post_error(trace.ui_state, "%s is invalid!", file_name)
 			return
 		}
 
 		if hdr.version != 1 && hdr.version != 2 {
-			post_error(trace, "Spall version %d for %s is invalid!", hdr.version, file_name)
+			post_error(trace.ui_state, "Spall version %d for %s is invalid!", hdr.version, file_name)
 			return
 		}
 		
@@ -610,20 +610,20 @@ load_file :: proc(loader: ^Loader, trace: ^Trace, file_name: string) {
 	} else if magic == spall_fmt.AUTO_MAGIC {
 		hdr, ok := slice_to_type(header_buffer[:], spall_fmt.Auto_Header)
 		if !ok {
-			post_error(trace, "%s is invalid!", file_name)
+			post_error(trace.ui_state, "%s is invalid!", file_name)
 			return
 		}
 
         if hdr.version == 1 {
-			post_error(trace, "Support for auto-tracing v1 has been dropped in this version, please grab the new header!")
+			post_error(trace.ui_state, "Support for auto-tracing v1 has been dropped in this version, please grab the new header!")
 			return
         }
 		if hdr.version != 2 {
-			post_error(trace, "Spall version %d for %s is invalid!", hdr.version, file_name)
+			post_error(trace.ui_state, "Spall version %d for %s is invalid!", hdr.version, file_name)
 			return
 		}
 		if total_size < i64(size_of(spall_fmt.Auto_Header)) + i64(hdr.program_path_len) {
-			post_error(trace, "%s is invalid!", file_name)
+			post_error(trace.ui_state, "%s is invalid!", file_name)
 			return
 		}
 		
@@ -652,7 +652,7 @@ load_file :: proc(loader: ^Loader, trace: ^Trace, file_name: string) {
 			file_type = .Json
 		} else {
 			file_type = .Invalid
-			post_error(trace, "%s is an unsupported file type!", file_name)
+			post_error(trace.ui_state, "%s is an unsupported file type!", file_name)
 		}
 	}
 
@@ -673,19 +673,15 @@ load_file :: proc(loader: ^Loader, trace: ^Trace, file_name: string) {
 
 	if parsed_properly && (p.pos == i64(header_size) || trace.event_count == 0) {
 		parsed_properly = false
-		post_error(trace, "Trace is empty, did you remember to quit your threads and enable -finstrument-functions?")
+		post_error(trace.ui_state, "Trace is empty, did you remember to quit your threads and enable -finstrument-functions?")
 	}
 
 	free_trace_temps(trace)
 	if !parsed_properly {
-		error_temp := trace.error_storage
-		error_str_len := len(trace.error_message)
+		ui_state.error_message = string(ui_state.error_storage[:len(ui_state.error_message)])
 
 		free_trace(trace)
-
-		init_trace(trace)
-		trace.error_storage = error_temp
-		trace.error_message = string(trace.error_storage[:error_str_len])
+		init_trace(trace, ui_state)
 		return
 	}
 

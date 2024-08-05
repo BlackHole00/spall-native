@@ -158,7 +158,7 @@ threaded_config_load :: proc(loader: ^Loader, data: rawptr) {
 
 	total_time     := time.tick_now()
 	parse_start    := time.tick_now()
-	load_file(loader, trace, filename)
+	load_file(loader, trace, ui_state, filename)
 	parse_duration := time.tick_since(parse_start)
 
 	fmt.printf("trace load took: %f ms, got %s events\n", time.duration_milliseconds(parse_duration), tens_fmt(u64(trace.event_count)))
@@ -173,13 +173,12 @@ threaded_config_load :: proc(loader: ^Loader, data: rawptr) {
 }
 
 
-load_config :: proc(loader: ^Loader, trace: ^Trace, ui_state: ^UIState) -> bool {
+load_trace :: proc(loader: ^Loader, ui_state: ^UIState) -> bool {
 	if ui_state.loading_config {
 		return false
 	}
 
-	free_trace(trace)
-	init_trace(trace)
+	init_trace(ui_state)
 	ui_state.loading_config = true
 
 	state := new(ThreadFileLoadState)
@@ -240,7 +239,7 @@ main :: proc() {
 
 	clicked_t = time.tick_now()
 	ui_state := UIState{
-		ui_mode = .TraceView,
+		ui_mode = .MainMenu,
 		post_loading = true,
 		textboxes = make(map[TextboxKind]TextboxState),
 	}
@@ -262,7 +261,7 @@ main :: proc() {
 	thread_count := 1//max(os.processor_core_count() - 1, 1)
 	loader_init(&loader, thread_count)
 	trace := new(Trace)
-	init_trace(trace)
+	init_trace(trace, &ui_state)
 
 	if opt.terminal_mode {
 		if start_trace == "" {
@@ -278,6 +277,7 @@ main :: proc() {
 	}
 
 	set_color_mode(false, true)
+	init_keymap()
 
 	gfx := GFX_Context{}
 	width, height: f64
@@ -418,135 +418,115 @@ main :: proc() {
 			}
 
 			#partial switch ev.type {
-				case .Exit: break main_loop
-				case .MouseMoved: {
-					mouse_moved(ev.x, ev.y)
+			case .Exit: break main_loop
+			case .MouseMoved:
+				mouse_moved(ev.x, ev.y)
+
+			case .MouseUp:
+				if ev.mouse == .Left {
+					mouse_up(ev.x, ev.y)
 				}
-				case .MouseUp: {
-					if ev.mouse == .Left {
-						mouse_up(ev.x, ev.y)
-					}
+
+			case .MouseDown:
+				if ev.mouse == .Left {
+					mouse_down(ev.x, ev.y)
 				}
-				case .MouseDown: {
-					if ev.mouse == .Left {
-						mouse_down(ev.x, ev.y)
-					}
-				}
-				case .Scroll: {
-					mouse_scroll(ev.y)
-				}
-				case .KeyDown: {
+
+			case .Scroll:
+				mouse_scroll(ev.y)
+
+			case .KeyDown:
+				process_modifiers(ev.key, true)
+
+				if capture_text {
 					#partial switch ev.key {
-						case .LeftShift:    shift_down = true
-						case .RightShift:   shift_down = true
-						case .LeftControl:  ctrl_down = true
-						case .RightControl: ctrl_down = true
-						case .LeftAlt:      alt_down = true
-						case .RightAlt:     alt_down = true
-						case .LeftSuper:    super_down = true
-						case .RightSuper:   super_down = true
+					case .Backspace:
+						new_cursor := step_left_rune(selected_box.b.buf[:], selected_box.cursor)
+						remove_range(&selected_box.b.buf, new_cursor, selected_box.cursor)
+						selected_box.cursor = new_cursor
 
-						case .F11: should_toggle_fullscreen = true
-						case .Return: {
-							if alt_down {
-								should_toggle_fullscreen = true
-							}
+					case .Tab:
+						selected_box.focus = false
+						if shift_down {
+							selected_box = selected_box.prev
+						} else {
+							selected_box = selected_box.next
 						}
-						case .Backspace:
-							if capture_text {
-								new_cursor := step_left_rune(selected_box.b.buf[:], selected_box.cursor)
-								remove_range(&selected_box.b.buf, new_cursor, selected_box.cursor)
-								selected_box.cursor = new_cursor
-							}
-						case .Tab:
-							if capture_text {
-								selected_box.focus = false
-								if shift_down {
-									selected_box = selected_box.prev
-								} else {
-									selected_box = selected_box.next
-								}
-								selected_box.focus = true
-							}
-						case .Left:
-							if capture_text {
-								selected_box.cursor = step_left_rune(selected_box.b.buf[:], selected_box.cursor)
-							}
-						case .Right:
-							if capture_text {
-								selected_box.cursor = step_right_rune(selected_box.b.buf[:], selected_box.cursor)
-							}
-						case .Up:
-							if capture_text {
-								selected_box.cursor = 0
-							}
-						case .Down:
-							if capture_text {
-								selected_box.cursor = len(selected_box.b.buf)
-							}
-						case .V:
-							if capture_text && (ctrl_down || super_down) {
-								path := get_clipboard(&gfx)
-								strings.builder_reset(&selected_box.b)
-								strings.write_string(&selected_box.b, path)
-								selected_box.cursor = len(selected_box.b.buf)
-							}
-						case .R: {
-							if trace.file_name != "" && !capture_text &&
-							   (ctrl_down || super_down) && !ui_state.loading_config {
+						selected_box.focus = true
 
-								fmt.printf("attempting to load %s\n", trace.file_name)
-								// FIXME(will) it would be nice if this could be a function
-								// but it can't without deeper fixes to the the data flow
-								start_trace = strings.clone(trace.file_name)
-								// NOTE(will) maybe necessary?
-								ui_state.ui_mode = .TraceView
+					case .Left:
+						selected_box.cursor = step_left_rune(selected_box.b.buf[:], selected_box.cursor)
+
+					case .Right:
+						selected_box.cursor = step_right_rune(selected_box.b.buf[:], selected_box.cursor)
+
+					case .Up:
+						selected_box.cursor = 0
+
+					case .Down:
+						selected_box.cursor = len(selected_box.b.buf)
+
+					case .V:
+						if ctrl_down || super_down {
+							path := get_clipboard(&gfx)
+							strings.builder_reset(&selected_box.b)
+							strings.write_string(&selected_box.b, path)
+							selected_box.cursor = len(selected_box.b.buf)
+						}
+
+						fallthrough
+					case:
+						cur_str := strings.to_string(selected_box.b)
+						r_len := utf8.rune_count_in_string(cur_str)
+
+						buffer := [4]u8{}
+						new_rune := capture_keys(ev.key, buffer[:])
+						if new_rune != "" {
+							if selected_box.cursor == r_len {
+								strings.write_string(&selected_box.b, new_rune)
+								selected_box.cursor += 1
+							} else {
+								inject_at(&selected_box.b.buf, selected_box.cursor, new_rune)
+								selected_box.cursor += 1
 							}
 						}
 					}
-				}
-				case .KeyUp: {
+
+				} else {
 					#partial switch ev.key {
-						case .LeftShift:    shift_down = false
-						case .RightShift:   shift_down = false
-						case .LeftControl:  ctrl_down = false
-						case .RightControl: ctrl_down = false
-						case .LeftAlt:      alt_down = false
-						case .RightAlt:     alt_down = false
-						case .LeftSuper:    super_down = false
-						case .RightSuper:   super_down = false
+					case .F11: should_toggle_fullscreen = true
+					case .Return:
+						if alt_down {
+							should_toggle_fullscreen = true
+						}
+					case .R:
+						if trace.file_name != "" && 
+						   (ctrl_down || super_down) &&
+							!ui_state.loading_config {
+
+							fmt.printf("attempting to load %s\n", trace.file_name)
+							// FIXME(will) it would be nice if this could be a function
+							// but it can't without deeper fixes to the the data flow
+							start_trace = strings.clone(trace.file_name)
+							// NOTE(will) maybe necessary?
+							ui_state.ui_mode = .TraceView
+						}
 					}
 				}
-				case .Resize: {
-					width = ev.w
-					height = ev.h
-				}
-				case .FileDropped: {
-					start_trace = ev.str
-					ui_state.ui_mode = .TraceView
-					fmt.printf("start trace: %s\n", start_trace)
-				}
+
+			case .KeyUp:
+				process_modifiers(ev.key, false)
+
+			case .Resize:
+				width = ev.w
+				height = ev.h
+
+			case .FileDropped:
+				start_trace = ev.str
+				ui_state.ui_mode = .TraceView
+				fmt.printf("start trace: %s\n", start_trace)
 			}
 		}
-
-		/*
-			Not sure how to handle this yet...
-			case .TEXTINPUT:
-				if capture_text {
-					cur_str := strings.to_string(selected_box.b)
-					r_len := utf8.rune_count_in_string(cur_str)
-
-					new_rune := string(cstring(rawptr(&event.text.text)))
-					if selected_box.cursor == r_len {
-						strings.write_string(&selected_box.b, new_rune)
-						selected_box.cursor += 1
-					} else {
-						inject_at(&selected_box.b.buf, selected_box.cursor, new_rune)
-						selected_box.cursor += 1
-					}
-				}
-			}
-		*/
 
 		if should_toggle_fullscreen {
 			fullscreen = !fullscreen

@@ -285,7 +285,7 @@ draw_graph :: proc(gfx: ^GFX_Context, header: string, history: ^queue.Queue(f64)
 	}
 }
 
-draw_reduced_header :: proc(gfx: ^GFX_Context, trace: ^Trace, ui_state: ^UIState) {
+draw_reduced_header :: proc(gfx: ^GFX_Context, ui_state: ^UIState) {
 	header_rect := ui_state.header_rect
 	full_flamegraph_rect := ui_state.full_flamegraph_rect
 
@@ -313,14 +313,10 @@ draw_reduced_header :: proc(gfx: ^GFX_Context, trace: ^Trace, ui_state: ^UIState
 			if ok {
 				ui_state.ui_mode = .TraceView
 				start_trace = filename
-				load_config(&loader, trace, ui_state)
+				load_config(&loader, ui_state)
 			}
 		}
 		cursor_x += button_width + button_pad
-
-		file_name_width := measure_text(trace.base_name, .H1Size, .DefaultFont)
-		name_x := max((full_flamegraph_rect.w / 2) - (file_name_width / 2), cursor_x)
-		draw_text(gfx, trace.base_name, Vec2{name_x, (header_rect.h / 2) - (h1_height / 2)}, .H1Size, .DefaultFont, toolbar_text_color)
 
 		// colormode button nonsense
 		color_text : string
@@ -2284,10 +2280,10 @@ process_stats :: proc(trace: ^Trace, ui_state: ^UIState) {
 	}
 }
 
-draw_errorbox :: proc(gfx: ^GFX_Context, trace: ^Trace, ui_state: ^UIState) {
+draw_errorbox :: proc(gfx: ^GFX_Context, ui_state: ^UIState) {
 	inner_flamegraph_rect := ui_state.inner_flamegraph_rect
 
-	msg_width := measure_text(trace.error_message, .PSize, .DefaultFont)
+	msg_width := measure_text(ui_state.error_message, .PSize, .DefaultFont)
 	msg_height := em
 
 	error_rect := inner_flamegraph_rect
@@ -2296,7 +2292,7 @@ draw_errorbox :: proc(gfx: ^GFX_Context, trace: ^Trace, ui_state: ^UIState) {
 	error_rect.x = (inner_flamegraph_rect.x + inner_flamegraph_rect.w) - error_rect.w
 
 	draw_rect(gfx, error_rect, error_color)
-	draw_text(gfx, trace.error_message, Vec2{(error_rect.x + (error_rect.w / 2)) - (msg_width / 2), (error_rect.y + (error_rect.h / 2)) - (msg_height / 2)}, .PSize, .DefaultFont, text_color)
+	draw_text(gfx, ui_state.error_message, Vec2{(error_rect.x + (error_rect.w / 2)) - (msg_width / 2), (error_rect.y + (error_rect.h / 2)) - (msg_height / 2)}, .PSize, .DefaultFont, text_color)
 }
 
 draw_trace :: proc(gfx: ^GFX_Context, trace: ^Trace, ui_state: ^UIState, loader: ^Loader, dt: f64) {
@@ -2415,8 +2411,8 @@ draw_trace :: proc(gfx: ^GFX_Context, trace: ^Trace, ui_state: ^UIState, loader:
 			draw_rect_tooltip(gfx, trace, ui_state)
 		}
 
-		if trace.error_message != "" {
-			draw_errorbox(gfx, trace, ui_state)
+		if ui_state.error_message != "" {
+			draw_errorbox(gfx, ui_state)
 		}
 }
 
@@ -2508,5 +2504,6 @@ draw_main_menu :: proc(gfx: ^GFX_Context, trace: ^Trace, ui_state: ^UIState, dt:
 	start_sample_rect := Rect{line_x + (full_form_w / 2) - (sample_button_width / 2), line_y, sample_button_width, p_height + (em / 2)}
 	if button(gfx, start_sample_rect, sample_button_text, "", .DefaultFont, menu_rect.x, menu_rect.w) {
 		fmt.printf("Starting sampling\n")
+		post_error(ui_state
 	}
 }

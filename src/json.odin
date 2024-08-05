@@ -288,7 +288,7 @@ the_skipper :: proc(trace: ^Trace, jp: ^JSONParser, chunk: []u8) -> JSONState {
 
 		ch := chunk[chunk_pos(p)]
 		if ch != '{' && ch != '[' {
-			post_error(trace, "Your JSON file is invalid! got %c at pos %d, expected [ or {{", ch, real_pos(p))
+			post_error(trace.ui_state, "Your JSON file is invalid! got %c at pos %d, expected [ or {{", ch, real_pos(p))
 			return .InvalidFile
 		}
 
@@ -326,7 +326,7 @@ the_skipper :: proc(trace: ^Trace, jp: ^JSONParser, chunk: []u8) -> JSONState {
 
 				ch := chunk[chunk_pos(p)]
 				if ch != ':' {
-					post_error(trace, "Your JSON file is invalid! got %c, expected :", ch)
+					post_error(trace.ui_state, "Your JSON file is invalid! got %c, expected :", ch)
 					return .InvalidFile
 				}
 				p.pos += 1
@@ -339,7 +339,7 @@ the_skipper :: proc(trace: ^Trace, jp: ^JSONParser, chunk: []u8) -> JSONState {
 
 				ch = chunk[chunk_pos(p)]
 				if ch != '[' {
-					post_error(trace, "Your JSON file is invalid! got %c, expected [", ch)
+					post_error(trace.ui_state, "Your JSON file is invalid! got %c, expected [", ch)
 					return .InvalidFile
 				}
 
@@ -391,7 +391,7 @@ process_key_value :: proc(trace: ^Trace, ev: ^TempEvent, key: FieldType, value: 
 		ev.id = in_get(&trace.intern, &trace.string_block, value)
 	case .Ph:
 		if len(value) != 1 {
-			post_error(trace, "Invalid event type!")
+			post_error(trace.ui_state, "Invalid event type!")
 			return false
 		}
 
@@ -408,34 +408,34 @@ process_key_value :: proc(trace: ^Trace, ev: ^TempEvent, key: FieldType, value: 
 	case .Dur: 
 		dur, ok := parse_f64(value)
 		if !ok {
-			post_error(trace, "Invalid duration!")
+			post_error(trace.ui_state, "Invalid duration!")
 			return false
 		}
 		ev.duration = i64(dur * 1000 * trace.stamp_scale)
 	case .Ts: 
 		ts, ok := parse_f64(value)
 		if !ok {
-			post_error(trace, "Invalid timestamp!")
+			post_error(trace.ui_state, "Invalid timestamp!")
 			return false
 		}
 		ev.timestamp = i64(ts * 1000 * trace.stamp_scale)
 	case .Tid: 
 		tid, ok := parse_u32(value)
 		if !ok {
-			post_error(trace, "Invalid tid!")
+			post_error(trace.ui_state, "Invalid tid!")
 			return false
 		}
 		ev.thread_id = tid
 	case .Pid: 
 		pid, ok := parse_u32(value)
 		if !ok {
-			post_error(trace, "Invalid pid!")
+			post_error(trace.ui_state, "Invalid pid!")
 			return false
 		}
 		ev.process_id = pid
 	case .S: 
 		if len(value) != 1 {
-			post_error(trace, "Invalid scope!")
+			post_error(trace.ui_state, "Invalid scope!")
 			return false
 		}
 
@@ -459,19 +459,19 @@ process_sample :: proc(trace: ^Trace, jp: ^JSONParser, ev: ^TempEvent) -> bool {
 	if meta_str == "Profile" {
 		blob, err := json.parse_string(in_getstr(&trace.string_block, ev.args), json.DEFAULT_SPECIFICATION, false, context.temp_allocator)
 		if err != nil {
-			post_error(trace, "Failed to parse args?")
+			post_error(trace.ui_state, "Failed to parse args?")
 			return false
 		}
 
 		arg_map, _ := blob.(json.Object)
 		data_map, ok := arg_map["data"].(json.Object)
 		if !ok {
-			post_error(trace, "Invalid %s", meta_str)
+			post_error(trace.ui_state, "Invalid %s", meta_str)
 			return false
 		}
 		start_time_us, ok2 := data_map["startTime"].(json.Float)
 		if !ok2 {
-			post_error(trace, "Invalid %s", meta_str)
+			post_error(trace.ui_state, "Invalid %s", meta_str)
 			return false
 		}
 
@@ -509,7 +509,7 @@ process_sample :: proc(trace: ^Trace, jp: ^JSONParser, ev: ^TempEvent) -> bool {
 		chunk := ChunkArgs{}
 		err := json.unmarshal_string(in_getstr(&trace.string_block, ev.args), &chunk, json.DEFAULT_SPECIFICATION, context.temp_allocator)
 		if err != nil {
-			post_error(trace, "Failed to parse args")
+			post_error(trace.ui_state, "Failed to parse args")
 			return false
 		}
 
@@ -588,7 +588,7 @@ process_sample :: proc(trace: ^Trace, jp: ^JSONParser, ev: ^TempEvent) -> bool {
 						cur_node_id = profile.nodes[cur_node_id].parent
 
 						if cycle_count > 1000 {
-							post_error(trace, "stack too deep, do we have a cycle?")
+							post_error(trace.ui_state, "stack too deep, do we have a cycle?")
 							return false
 						}
 						cycle_count += 1
@@ -653,12 +653,12 @@ process_event :: proc(trace: ^Trace, jp: ^JSONParser, ev: ^TempEvent) -> bool {
 	case .End:
 		p_idx, ok1 := vh_find(&trace.process_map, u32(ev.process_id))
 		if !ok1 {
-			post_error(trace, "Invalid pid %d", ev.process_id)
+			post_error(trace.ui_state, "Invalid pid %d", ev.process_id)
 			return false
 		}
 		t_idx, ok2 := vh_find(&trace.processes[p_idx].thread_map, u32(ev.thread_id))
 		if !ok2 {
-			post_error(trace, "Invalid tid %d", ev.thread_id)
+			post_error(trace.ui_state, "Invalid tid %d", ev.thread_id)
 			return false
 		}
 
@@ -683,14 +683,14 @@ process_event :: proc(trace: ^Trace, jp: ^JSONParser, ev: ^TempEvent) -> bool {
 		if meta_str == "thread_name" || meta_str == "process_name" {
 			blob, err := json.parse_string(in_getstr(&trace.string_block, ev.args), json.DEFAULT_SPECIFICATION, false, context.temp_allocator)
 			if err != nil {
-				post_error(trace, "Failed to parse args?")
+				post_error(trace.ui_state, "Failed to parse args?")
 				return false
 			}
 
 			arg_map, _ := blob.(json.Object)
 			m_name, ok := arg_map["name"].(json.String)
 			if !ok {
-				post_error(trace, "Invalid %s", meta_str)
+				post_error(trace.ui_state, "Invalid %s", meta_str)
 				return false
 			}
 
@@ -841,7 +841,7 @@ json_parse :: proc (trace: ^Trace, fd: os.Handle) -> bool {
 
 	read_size, err := os.read_at(fd, chunk_buffer, 0)
 	if err != 0 {
-		post_error(trace, "Unable to read file!")
+		post_error(trace.ui_state, "Unable to read file!")
 		return false
 	}
 
@@ -851,7 +851,7 @@ json_parse :: proc (trace: ^Trace, fd: os.Handle) -> bool {
 	pre_loop: for p.pos <= i64(trace.total_size) {
 		state := the_skipper(trace, &jp, full_chunk)
 		if p.pos >= i64(trace.total_size) {
-			post_error(trace, "Failed to read file!")
+			post_error(trace.ui_state, "Failed to read file!")
 			return false
 		}
 
@@ -860,7 +860,7 @@ json_parse :: proc (trace: ^Trace, fd: os.Handle) -> bool {
 			p.offset = p.pos
 			rd_sz, ok := get_chunk(p, fd, chunk_buffer)
 			if !ok {
-				post_error(trace, "Failed to read file!")
+				post_error(trace.ui_state, "Failed to read file!")
 				return false
 			}
 
@@ -889,7 +889,7 @@ json_parse :: proc (trace: ^Trace, fd: os.Handle) -> bool {
 			p.offset = p.pos
 			rd_sz, ok := get_chunk(p, fd, chunk_buffer)
 			if !ok {
-				post_error(trace, "Failed to read file!")
+				post_error(trace.ui_state, "Failed to read file!")
 				return false
 			}
 
