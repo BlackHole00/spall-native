@@ -8,15 +8,13 @@ import "core:strings"
 import SDL "vendor:sdl2"
 import gl "vendor:OpenGL"
 
-default_cursor: ^SDL.Cursor
-pointer_cursor: ^SDL.Cursor
-text_cursor:    ^SDL.Cursor
 
 GFX_Context :: struct {
-	window: ^SDL.Window,
+	default_cursor: ^SDL.Cursor,
+	pointer_cursor: ^SDL.Cursor,
+	text_cursor:    ^SDL.Cursor,
 
-	rects:      [dynamic]DrawRect,
-	text_rects: [dynamic]TextRect,
+	window: ^SDL.Window,
 }
 
 _resolve_key :: proc(code: SDL.Keycode) -> KeyType {
@@ -73,7 +71,7 @@ _resolve_key :: proc(code: SDL.Keycode) -> KeyType {
 		case .RETURN:     return .Return
 		case .TAB:        return .Tab
 		case .SPACE:      return .Space
-		case .BACKSPACE:  return .Delete
+		case .BACKSPACE:  return .Backspace
 		case .ESCAPE:     return .Escape
 		case .CAPSLOCK:   return .CapsLock
 
@@ -115,20 +113,19 @@ _resolve_key :: proc(code: SDL.Keycode) -> KeyType {
 }
 
 dpi_hack_val := 0.0
-create_context :: proc(title: cstring, width, height: int) -> (GFX_Context, f64, f64, f64) {
-	gfx := GFX_Context{}
+create_context :: proc(pt: ^Platform_State, title: cstring, width, height: int) -> bool {
+	pt.gfx = GFX_Context{}
 
 	orig_window_width := i32(width)
 	orig_window_height := i32(height)
 
-	platform_pre_init()
+	platform_pre_init(pt)
 
-	dpr := 0.0
 	dpi_hack_val = platform_dpi_hack()
 	if dpi_hack_val > 0 {
-		dpr = dpi_hack_val
-		orig_window_width = i32(f64(orig_window_width) * dpr)
-		orig_window_height = i32(f64(orig_window_height) * dpr)
+		pt.dpr = dpi_hack_val
+		orig_window_width = i32(f64(orig_window_width) * pt.dpr)
+		orig_window_height = i32(f64(orig_window_height) * pt.dpr)
 	}
 
 	SDL.Init({.VIDEO})
@@ -151,11 +148,11 @@ create_context :: proc(title: cstring, width, height: int) -> (GFX_Context, f64,
 		os.exit(1)
 	}
 
-	platform_post_init()
+	platform_post_init(pt)
 
-	default_cursor = SDL.CreateSystemCursor(.ARROW)
-	pointer_cursor = SDL.CreateSystemCursor(.HAND)
-	text_cursor    = SDL.CreateSystemCursor(.IBEAM)
+	pt.gfx.default_cursor = SDL.CreateSystemCursor(.ARROW)
+	pt.gfx.pointer_cursor = SDL.CreateSystemCursor(.HAND)
+	pt.gfx.text_cursor    = SDL.CreateSystemCursor(.IBEAM)
 
 	gl_context := SDL.GL_CreateContext(window)
 	if gl_context == nil {
@@ -192,18 +189,18 @@ create_context :: proc(title: cstring, width, height: int) -> (GFX_Context, f64,
 	if dpi_hack_val < 0 {
 		dpr_w := f64(real_window_width) / f64(pretend_window_width)
 		dpr_h := f64(real_window_height) / f64(pretend_window_height)
-		dpr = dpr_w
-		width = width * dpr
-		height = height * dpr
+		pt.dpr = dpr_w
+		pt.width = width * pt.dpr
+		pt.height = height * pt.dpr
 	}
 
-	gfx.window = window
-	gfx.rects = make([dynamic]DrawRect)
-	gfx.text_rects = make([dynamic]TextRect)
-	return gfx, dpr, width, height
+	pt.gfx.window = window
+	pt.rects = make([dynamic]DrawRect)
+	pt.text_rects = make([dynamic]TextRect)
+	return true
 }
 
-get_next_event :: proc(gfx: ^GFX_Context, wait: bool) -> PlatformEvent {
+get_next_event :: proc(pt: ^Platform_State, wait: bool) -> PlatformEvent {
 	event: SDL.Event = ---
 	ret: bool
 	if wait {
@@ -221,8 +218,8 @@ get_next_event :: proc(gfx: ^GFX_Context, wait: bool) -> PlatformEvent {
 			x := f64(event.motion.x)
 			y := f64(event.motion.y)
 			if dpi_hack_val > 0 {
-				x /= dpr
-				y /= dpr
+				x /= pt.dpr
+				y /= pt.dpr
 			}
 
 			return PlatformEvent{type = .MouseMoved, x = x, y = y}
@@ -237,8 +234,8 @@ get_next_event :: proc(gfx: ^GFX_Context, wait: bool) -> PlatformEvent {
 				x := f64(event.button.x)
 				y := f64(event.button.y)
 				if dpi_hack_val > 0 {
-					x /= dpr
-					y /= dpr
+					x /= pt.dpr
+					y /= pt.dpr
 				}
 
 				return PlatformEvent{type = .MouseUp, mouse = type, x = x, y = y}
@@ -254,8 +251,8 @@ get_next_event :: proc(gfx: ^GFX_Context, wait: bool) -> PlatformEvent {
 				x := f64(event.button.x)
 				y := f64(event.button.y)
 				if dpi_hack_val > 0 {
-					x /= dpr
-					y /= dpr
+					x /= pt.dpr
+					y /= pt.dpr
 				}
 
 				return PlatformEvent{type = .MouseDown, mouse = type, x = x, y = y}
@@ -286,8 +283,8 @@ get_next_event :: proc(gfx: ^GFX_Context, wait: bool) -> PlatformEvent {
 					w := f64(event.window.data1)
 					h := f64(event.window.data2)
 					if dpi_hack_val < 0 {
-						w *= dpr
-						h *= dpr
+						w *= pt.dpr
+						h *= pt.dpr
 					}
 
 					return PlatformEvent{type = .Resize, w = w, h = h}
@@ -315,17 +312,17 @@ set_fullscreen :: proc(gfx: ^GFX_Context, fullscreen: bool) -> (int, int) {
 	return int(iw), int(ih)
 }
 
-set_cursor :: proc(gfx: ^GFX_Context, type: string) {
+set_cursor :: proc(pt: ^Platform_State, type: string) {
 	switch type {
-	case "auto":    SDL.SetCursor(default_cursor)
-	case "pointer": SDL.SetCursor(pointer_cursor)
-	case "text":    SDL.SetCursor(text_cursor)
+	case "auto":    SDL.SetCursor(pt.gfx.default_cursor)
+	case "pointer": SDL.SetCursor(pt.gfx.pointer_cursor)
+	case "text":    SDL.SetCursor(pt.gfx.text_cursor)
 	}
-	is_hovering = true
+	pt.is_hovering = true
 }
-reset_cursor :: proc(gfx: ^GFX_Context) { 
-	set_cursor(gfx, "auto") 
-	is_hovering = false
+reset_cursor :: proc(pt: ^Platform_State) { 
+	set_cursor(pt, "auto") 
+	pt.is_hovering = false
 }
 
 get_clipboard :: proc(gfx: ^GFX_Context) -> string {
