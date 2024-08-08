@@ -631,7 +631,8 @@ load_file :: proc(loader: ^Loader, trace: ^Trace, file_name: string) {
 		trace.base_address = hdr.base_address
 		fmt.printf("Base address of executable: 0x%08x\n", trace.base_address)
 
-		symbol_path := string(header_buffer[size_of(spall_fmt.Auto_Header):][:hdr.program_path_len])
+		path_buffer := header_buffer[size_of(spall_fmt.Auto_Header):][:hdr.program_path_len]
+		symbol_path := string(path_buffer)
 		if (opt.exe_path != "") {
 			symbol_path = opt.exe_path
 		}
