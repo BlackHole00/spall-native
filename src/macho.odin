@@ -149,7 +149,7 @@ load_macho_debug :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 	ranges_section    := Mach_Section{}
 	found_debug := 0
 
-	text_skew : u64 = 0
+	text_segment_offset : u64 = 0
 	read_idx := size_of(Mach_Header_64)
 	for read_idx < len(exec_buffer) {
 		current_buffer := exec_buffer[read_idx:]
@@ -162,7 +162,7 @@ load_macho_debug :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 			segment_header := slice_to_type(exec_buffer[read_idx:], Mach_Segment_64_Command) or_return
 			segment_name := strings.string_from_null_terminated_ptr(raw_data(segment_header.name[:]), 16)
 			if segment_name == "__TEXT" {
-				text_skew = segment_header.address
+				text_segment_offset = segment_header.address
 			}
 
 			if segment_name == "__DWARF" {
@@ -195,11 +195,11 @@ load_macho_debug :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 	if found_debug < 4 {
 		return false
 	}
-	if text_skew == 0 {
+	if text_segment_offset == 0 {
 		return false
 	}
 
-	trace.base_address -= text_skew
+	trace.base_address -= text_segment_offset
 
 	sections := Sections{}
 	sections.abbrev    = create_subbuffer(exec_buffer, u64(abbrev_section.offset), abbrev_section.size) or_return
