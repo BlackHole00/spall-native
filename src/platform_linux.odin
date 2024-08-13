@@ -348,7 +348,7 @@ create_context :: proc(title: cstring, width, height: int) -> (GFX_Context, f64,
 	surface := egl.Surface{}
 	{
 		attr := [?]i32{
-			egl.GL_COLORSPACE, egl.GL_COLORSPACE_LINEAR,
+			egl.GL_COLORSPACE, egl.GL_COLORSPACE_SRGB,
 			egl.RENDER_BUFFER, egl.BACK_BUFFER,
 			egl.NONE,
 		}
