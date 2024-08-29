@@ -175,16 +175,6 @@ sample_child :: proc(trace: ^Trace, program_name: string, args: []string) -> (ok
 	}
 	child_port := recv_msg.task_port.name
 
-	vm_offset : u64 = 0
-	vm_size : u64 = 0
-	depth : u32 = 0
-	vbr := darwin.vm_region_submap_info_64{}
-	vbr_count : u32 = darwin.VM_REGION_SUBMAP_INFO_COUNT_64
-	if darwin.mach_vm_region_recurse(child_task, &vm_offset, &vm_size, &depth, darwin.vm_region_recurse_info_t(&vbr), &vbr_count) != 0 {
-		fmt.printf("Failed to get child base address\n")
-		return
-	}
-
 	// Send the all clear
 	send_msg := Mach_Send_Msg{}
 	send_msg.header.msgh_remote_port = child_port
@@ -230,7 +220,6 @@ sample_child :: proc(trace: ^Trace, program_name: string, args: []string) -> (ok
 	init_trace_allocs(trace, program_name)
 
 	trace.stamp_scale = ((1 / f64(freq)) * 1_000_000_000)
-	trace.base_address = vm_offset
 
 	proc_idx := setup_pid(trace, 0)
 	process := &trace.processes[proc_idx]
