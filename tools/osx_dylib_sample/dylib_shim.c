@@ -33,7 +33,7 @@ static void load_same(int argc, const char **argv) {
 	}
 
 	mach_port_t parent_port;
-	err = bootstrap_look_up(bootstrap_port, "SAME_BOOTSTRAP", &parent_port);
+	err = bootstrap_look_up(bootstrap_port, "SPALL_BOOTSTRAP", &parent_port);
 	if (err != 0) {
 		printf("Failed to init sampling!\n");
 		exit(1);

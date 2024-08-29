@@ -116,7 +116,7 @@ int main(int argc, char **argv, char **envp) {
 		exit(1);
 	}
 
-	err = bootstrap_register2(bootstrap_port, "SAME_BOOTSTRAP", right, 0);
+	err = bootstrap_register2(bootstrap_port, "SPALL_BOOTSTRAP", right, 0);
 	if (err != 0) {
 		printf("oops 4?\n");
 		exit(1);

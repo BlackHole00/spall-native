@@ -742,3 +742,5 @@ demangle_symbol :: proc(name: string, tmp_buffer: []u8) -> (string, bool) {
 
 	return string(ret_str), true
 }
+
+sample_child :: proc() -> (ok: bool) { return }

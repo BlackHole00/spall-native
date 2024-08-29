@@ -241,6 +241,12 @@ main :: proc() {
 
 	flags.parse_or_exit(&opt, os.args, .Unix)
 
+	if !sample_child() {
+		fmt.printf("Failed to spawn child to sample\n")
+		return
+	}
+	if true { return }
+
 	clicked_t = time.tick_now()
 	ui_state := UIState{
 		ui_mode = .TraceView,

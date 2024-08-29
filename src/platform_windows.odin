@@ -63,3 +63,5 @@ open_file_dialog :: proc() -> (string, bool) {
 demangle_symbol :: proc(name: string, tmp_buffer: []u8) -> (string, bool) {
 	return name, true
 }
+
+sample_child :: proc() -> (ok: bool) { return }
