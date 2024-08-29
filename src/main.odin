@@ -241,15 +241,21 @@ main :: proc() {
 
 	flags.parse_or_exit(&opt, os.args, .Unix)
 
-	if !sample_child() {
-		fmt.printf("Failed to spawn child to sample\n")
-		return
+	open_mode := UIMode.TraceView
+	// If user set a file on the cmdline
+	if opt.file != "" {
+		start_trace = strings.clone(opt.file)
+	} else {
+
+		// Does the platform support sampling?
+		if supports_sampling() {
+			open_mode = .MainMenu
+		}
 	}
-	if true { return }
 
 	clicked_t = time.tick_now()
 	ui_state := UIState{
-		ui_mode = .TraceView,
+		ui_mode = open_mode,
 		post_loading = true,
 		textboxes = make(map[TextboxKind]TextboxState),
 	}
@@ -262,11 +268,6 @@ main :: proc() {
 	first.prev = second
 	second.next = first
 	second.prev = first
-
-	if opt.file != "" {
-		start_trace = strings.clone(opt.file)
-		ui_state.ui_mode = .TraceView
-	}
 
 	thread_count := 1//max(os.processor_core_count() - 1, 1)
 	loader_init(&loader, thread_count)
@@ -542,27 +543,24 @@ main :: proc() {
 					ui_state.ui_mode = .TraceView
 					fmt.printf("start trace: %s\n", start_trace)
 				}
-			}
-		}
+				case .Rune: {
+					if capture_text {
+						cur_str := strings.to_string(selected_box.b)
+						r_len := utf8.rune_count_in_string(cur_str)
 
-		/*
-			Not sure how to handle this yet...
-			case .TEXTINPUT:
-				if capture_text {
-					cur_str := strings.to_string(selected_box.b)
-					r_len := utf8.rune_count_in_string(cur_str)
-
-					new_rune := string(cstring(rawptr(&event.text.text)))
-					if selected_box.cursor == r_len {
-						strings.write_string(&selected_box.b, new_rune)
-						selected_box.cursor += 1
-					} else {
-						inject_at(&selected_box.b.buf, selected_box.cursor, new_rune)
-						selected_box.cursor += 1
+						new_rune := ev.str
+						defer delete(new_rune)
+						if selected_box.cursor == r_len {
+							strings.write_string(&selected_box.b, new_rune)
+							selected_box.cursor += 1
+						} else {
+							inject_at(&selected_box.b.buf, selected_box.cursor, new_rune)
+							selected_box.cursor += 1
+						}
 					}
 				}
 			}
-		*/
+		}
 
 		if should_toggle_fullscreen {
 			fullscreen = !fullscreen

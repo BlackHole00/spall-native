@@ -4,10 +4,12 @@ package main
 
 import "core:fmt"
 import "core:strings"
-import NS "core:sys/darwin/Foundation"
-import "core:sys/darwin"
+import "core:path/filepath"
+import "core:sys/posix"
 import "core:os"
 import "core:os/os2"
+import "core:sys/darwin"
+import NS "core:sys/darwin/Foundation"
 
 platform_pre_init :: proc() {
 	velocity_multiplier = -15
@@ -76,7 +78,7 @@ Mach_Send_Msg :: struct {
 	task_port: darwin.mach_msg_port_descriptor_t,
 }
 
-sample_child :: proc() -> (ok: bool) {
+sample_child :: proc(program_name: string, args: []string) -> (ok: bool) {
 	recv_port: darwin.mach_port_t
 	my_task := darwin.mach_task_self()
 	if darwin.mach_port_allocate(my_task, darwin.MACH_PORT_RIGHT_RECEIVE, &recv_port) != 0 {
@@ -98,24 +100,26 @@ sample_child :: proc() -> (ok: bool) {
 		return
 	}
 
-	args := []string{}
-
 	env_vars := os2.environ(context.temp_allocator)
 	envs := make([dynamic]string, len(env_vars)+1, context.temp_allocator)
 	i := 0
 	for ; i < len(env_vars); i += 1 {
 		envs[i] = string(env_vars[i])
 	}
-	
+
 	dir, err := os2.get_working_directory(context.temp_allocator)
 	if err != nil { return }
 
-	pathname := fmt.tprintf("%s/tools/stats/stats", dir)
+	prog_path := program_name
+	if !filepath.is_abs(prog_path) {
+		prog_path = fmt.tprintf("%s/%s", dir, program_name)
+	}
+	
 	envs[i] = fmt.tprintf("DYLD_INSERT_LIBRARIES=%s/tools/osx_dylib_sample/%s", dir, "same.dylib")
 
-	child_pid, err2 := os.posix_spawn(pathname, args, envs[:], nil, nil)
+	child_pid, err2 := os.posix_spawn(prog_path, args, envs[:], nil, nil)
 	if err2 != nil {
-		fmt.printf("failed to spawn: %s\n", pathname)
+		fmt.printf("failed to spawn: %s\n", prog_path)
 		return
 	}
 	fmt.printf("Spawned %v\n", child_pid)
@@ -186,5 +190,16 @@ sample_child :: proc() -> (ok: bool) {
 
 	fmt.printf("Resuming child\n")
 
+	status: i32 = 0
+	for !posix.WIFEXITED(status) && posix.WIFSIGNALED(status) {
+		if posix.waitpid(posix.pid_t(child_pid), &status, nil) == -1 {
+			fmt.printf("failed to wait on child\n")
+			return
+		}
+	}
+	fmt.printf("child exited?\n")
+
 	return true
 }
+
+supports_sampling :: proc() -> (ok: bool) { return true }

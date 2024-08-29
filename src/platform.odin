@@ -23,6 +23,7 @@ PlatformEventType :: enum {
 	KeyUp,
 	Resize,
 	FileDropped,
+	Rune,
 	More,
 	Exit,
 }

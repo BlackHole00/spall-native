@@ -65,3 +65,4 @@ demangle_symbol :: proc(name: string, tmp_buffer: []u8) -> (string, bool) {
 }
 
 sample_child :: proc() -> (ok: bool) { return }
+supports_sampling :: proc() -> (ok: bool) { return }

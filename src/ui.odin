@@ -2518,6 +2518,14 @@ draw_main_menu :: proc(gfx: ^GFX_Context, trace: ^Trace, ui_state: ^UIState, dt:
 	full_form_w := form_w + edge_pad + button_width
 	start_sample_rect := Rect{line_x + (full_form_w / 2) - (sample_button_width / 2), line_y, sample_button_width, p_height + (em / 2)}
 	if button(gfx, start_sample_rect, sample_button_text, "", .DefaultFont, menu_rect.x, menu_rect.w) {
-		fmt.printf("Starting sampling\n")
+		program_name := strings.to_string(program_input_box.b)
+		program_args := strings.to_string(cmdargs_input_box.b)
+
+		// TODO replace me with something that respects quote-escapes
+		args := strings.split(program_args, " ")
+
+		if !sample_child(program_name, args) {
+			fmt.printf("Failed to sample child!\n")
+		}
 	}
 }
