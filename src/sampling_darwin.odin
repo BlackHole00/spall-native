@@ -366,6 +366,7 @@ sample_child :: proc(trace: ^Trace, program_name: string, args: []string) -> (ok
 			next_sample := sample_thread.samples[i+1]
 			duration := next_sample.ts - cur_sample.ts
 
+			stack_similarity := true
 			k := 0
 			stack_loop: for j := len(cur_sample.callstack) - 1; j >= 0; j -= 1 {
 				depth := &thread.depths[k]
@@ -388,8 +389,9 @@ sample_child :: proc(trace: ^Trace, program_name: string, args: []string) -> (ok
 				prev_addr := prev_sample.callstack[prev_j]
 
 				// If the last sample stack had a different address from us
-				if prev_addr != cur_addr {
+				if prev_addr != cur_addr || !stack_similarity {
 					push_event(trace, &depth.events, cur_addr, cur_sample.ts, duration)
+					stack_similarity = false
 					continue stack_loop
 				}
 
@@ -408,6 +410,7 @@ sample_child :: proc(trace: ^Trace, program_name: string, args: []string) -> (ok
 			cur_sample := sample_thread.samples[i]
 			duration := i64(trailing_ts) - cur_sample.ts
 
+			stack_similarity := true
 			k := 0
 			stack_loop2: for j := len(cur_sample.callstack) - 1; j >= 0; j -= 1 {
 				depth := &thread.depths[k]
@@ -430,8 +433,9 @@ sample_child :: proc(trace: ^Trace, program_name: string, args: []string) -> (ok
 				prev_addr := prev_sample.callstack[prev_j]
 
 				// If the last sample stack had a different address from us
-				if prev_addr != cur_addr {
+				if prev_addr != cur_addr || !stack_similarity {
 					push_event(trace, &depth.events, cur_addr, cur_sample.ts, duration)
+					stack_similarity = false
 					continue stack_loop2
 				}
 
