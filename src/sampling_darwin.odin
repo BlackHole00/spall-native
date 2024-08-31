@@ -348,51 +348,95 @@ sample_child :: proc(trace: ^Trace, program_name: string, args: []string) -> (ok
 			non_zero_append(&thread.depths, depth)
 		}
 
+		push_event :: proc(trace: ^Trace, events: ^[dynamic]Event, addr: u64, ts: i64, dur: i64) {
+			ev := add_event(events)
+			ev^ = Event{
+				has_addr = true,
+				id = addr,
+				args = 0,
+				timestamp = ts,
+				duration = dur,
+			}
+			trace.event_count += 1
+		}
+
 		// blast through the bulk of the samples
 		for i := 0; i < len(sample_thread.samples) - 1; i += 1 {
 			cur_sample := sample_thread.samples[i]
 			next_sample := sample_thread.samples[i+1]
 			duration := next_sample.ts - cur_sample.ts
 
-			k := len(cur_sample.callstack) - 1
-			for j := 0; j < len(cur_sample.callstack); j += 1 {
+			k := 0
+			stack_loop: for j := len(cur_sample.callstack) - 1; j >= 0; j -= 1 {
 				depth := &thread.depths[k]
-				k -= 1
+				k += 1
 
-				ev := add_event(&depth.events)
-				ev^ = Event{
-					has_addr = true,
-					id = cur_sample.callstack[j],
-					args = 0,
-					timestamp = cur_sample.ts,
-					duration = duration,
+				// If this is the first sample, we're not a continuation
+				cur_addr := cur_sample.callstack[j]
+				if i == 0 {
+					push_event(trace, &depth.events, cur_addr, cur_sample.ts, duration)
+					continue stack_loop
 				}
+
+				// If the previous callstack wasn't this deep
+				prev_sample := sample_thread.samples[i-1]
+				prev_j := len(prev_sample.callstack) - k
+				if len(prev_sample.callstack) <= prev_j || prev_j < 0 {
+					push_event(trace, &depth.events, cur_addr, cur_sample.ts, duration)
+					continue stack_loop
+				}
+				prev_addr := prev_sample.callstack[prev_j]
+
+				// If the last sample stack had a different address from us
+				if prev_addr != cur_addr {
+					push_event(trace, &depth.events, cur_addr, cur_sample.ts, duration)
+					continue stack_loop
+				}
+
+				prev_ev := &depth.events[len(depth.events)-1]
+				prev_ev.duration += duration
 			}
 
 			thread.min_time = min(thread.min_time, cur_sample.ts)
 			process.min_time = min(process.min_time, cur_sample.ts)
 			trace.total_min_time = min(trace.total_min_time, cur_sample.ts)
-			trace.event_count += 1
 		}
 
 		// handle last sample as a special case
 		{
-			cur_sample := sample_thread.samples[len(sample_thread.samples)-1]
+			i := len(sample_thread.samples)-1
+			cur_sample := sample_thread.samples[i]
 			duration := i64(trailing_ts) - cur_sample.ts
 
-			k := len(cur_sample.callstack) - 1
-			for j := 0; j < len(cur_sample.callstack); j += 1 {
+			k := 0
+			stack_loop2: for j := len(cur_sample.callstack) - 1; j >= 0; j -= 1 {
 				depth := &thread.depths[k]
-				k -= 1
+				k += 1
 
-				ev := add_event(&depth.events)
-				ev^ = Event{
-					has_addr = true,
-					id = cur_sample.callstack[j],
-					args = 0,
-					timestamp = cur_sample.ts,
-					duration = duration,
+				// If this is the first sample, we're not a continuation
+				cur_addr := cur_sample.callstack[j]
+				if i == 0 {
+					push_event(trace, &depth.events, cur_addr, cur_sample.ts, duration)
+					continue stack_loop2
 				}
+
+				// If the previous callstack wasn't this deep
+				prev_sample := sample_thread.samples[i-1]
+				prev_j := len(prev_sample.callstack) - k
+				if len(prev_sample.callstack) <= prev_j || prev_j < 0 {
+					push_event(trace, &depth.events, cur_addr, cur_sample.ts, duration)
+					continue stack_loop2
+				}
+				prev_addr := prev_sample.callstack[prev_j]
+
+				// If the last sample stack had a different address from us
+				if prev_addr != cur_addr {
+					push_event(trace, &depth.events, cur_addr, cur_sample.ts, duration)
+					continue stack_loop2
+				}
+
+				prev_ev := &depth.events[len(depth.events)-1]
+				prev_ev.duration += duration
 			}
 
 			trace.total_min_time = min(trace.total_min_time, cur_sample.ts)
@@ -400,7 +444,6 @@ sample_child :: proc(trace: ^Trace, program_name: string, args: []string) -> (ok
 			thread.min_time = min(thread.min_time, cur_sample.ts)
 			thread.max_time = max(thread.max_time, cur_sample.ts + duration)
 			process.min_time = min(process.min_time, cur_sample.ts)
-			trace.event_count += 1
 		}
 	}
 	fmt.printf("Sampled %v events\n", trace.event_count)
