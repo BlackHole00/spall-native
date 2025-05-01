@@ -2,6 +2,8 @@
  
 package main
 
+foreign import freq "freq.a"
+
 import "core:fmt"
 import "core:os"
 import "core:os/os2"
@@ -39,6 +41,10 @@ Sample_State :: struct {
 	threads: map[u64]Sample_Thread,
 	program_path: string,
 	dylibs_checked: bool,
+}
+
+foreign freq {
+    get_frequency :: proc() -> u64 ---
 }
 
 map_child_mem :: proc(my_task: darwin.task_t, child_task: darwin.task_t, addr: u64, $T: typeid) -> (val: ^T, ok: bool) {
@@ -464,15 +470,15 @@ sample_child :: proc(trace: ^Trace, program_name: string, args: []string) -> (ok
 		}
     }
 
-    freq : u64 = 0
-    if ODIN_ARCH == .amd64 {
-        freq, _ = time.tsc_frequency()
-    } else if ODIN_ARCH == .arm64 {
-        // TODO: This is incorrect
-        freq = 1_000_000_000
+    freq := 0
+    if ODIN_OS == .Darwin {
+        freq = int(get_frequency())
     } else {
-        fmt.printf("Unable to get timer frequency!\n")
-        return
+        freq, ok := time.tsc_frequency()
+        if !ok {
+            fmt.printf("Failed to get frequency!\n")
+            return
+        }
     }
 
 	trace.stamp_scale = ((1 / f64(freq)) * 1_000_000_000)
