@@ -17,6 +17,7 @@ Sections :: struct {
 	info:        []u8,
 	ranges:      []u8,
 	rnglists:    []u8,
+	unwind_info: []u8,
 }
 
 Dw_Form :: enum {

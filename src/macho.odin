@@ -14,7 +14,7 @@ MACH_CPU_ABI_64      :: 0x1000000
 MACH_CPU_TYPE_I386   :: 7
 MACH_CPU_TYPE_X86_64 :: MACH_CPU_TYPE_I386 | MACH_CPU_ABI_64
 MACH_CPU_TYPE_ARM    :: 12
-
+MACH_CPU_TYPE_ARM64  :: MACH_CPU_TYPE_ARM | MACH_CPU_ABI_64
 MACH_CMD_SYMTAB      :: 0x2
 MACH_CMD_SEGMENT_64  :: 0x19
 MACH_CMD_UUID        :: 0x1B
@@ -143,7 +143,7 @@ load_macho_symbols :: proc(trace: ^Trace, _exec_buffer: []u8, bucket: ^Func_Buck
 			arch_header.size = intrinsics.byte_swap(arch_header.size)
 			arch_header.align = intrinsics.byte_swap(arch_header.align)
 
-			if arch_header.cpu_type == MACH_CPU_TYPE_X86_64 {
+			if arch_header.cpu_type == MACH_CPU_TYPE_X86_64 || arch_header.cpu_type == MACH_CPU_TYPE_ARM64 {
 				exec_buffer = exec_buffer[arch_header.offset:]
 				read_idx = 0
 				break
@@ -285,6 +285,8 @@ load_macho_debug :: proc(trace: ^Trace, exec_buffer: []u8, bucket: ^Func_Bucket)
 						sections.ranges      = create_subbuffer(exec_buffer, u64(section.offset), section.size) or_return
 					case "__debug_rnglists":
 						sections.rnglists    = create_subbuffer(exec_buffer, u64(section.offset), section.size) or_return
+					case "__unwind_info":
+						sections.unwind_info = create_subbuffer(exec_buffer, u64(section.offset), section.size) or_return
 					}
 
 					sub_idx += size_of(Mach_Section)

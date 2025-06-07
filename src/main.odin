@@ -107,6 +107,7 @@ ThreadSampleRunState :: struct {
 	trace: ^Trace,
 	ui_state: ^UIState,
 	program_name: string,
+	program_path: string,
 	program_args: string,
 }
 
@@ -117,6 +118,7 @@ threaded_sample_start :: proc(loader: ^Loader, data: rawptr) {
 	ui_state := state.ui_state
 	program_name := state.program_name
 	program_args := state.program_args
+	program_path := state.program_path
 	free(state)
 
 	// TODO replace me with something that respects quote-escapes
@@ -124,7 +126,8 @@ threaded_sample_start :: proc(loader: ^Loader, data: rawptr) {
 	if len(program_args) > 0 {
 		args = strings.split(program_args, " ")
 	}
-	sample_child(trace, program_name, args)
+
+	sample_child(trace, program_name, program_path, args)
 
 	pool_wait(&loader.pool)
 	free_trace_temps(trace)
@@ -133,7 +136,7 @@ threaded_sample_start :: proc(loader: ^Loader, data: rawptr) {
 	ui_state.post_loading = true
 }
 
-start_sampling :: proc(loader: ^Loader, trace: ^Trace, ui_state: ^UIState, program_name: string, program_args: string) -> bool {
+start_sampling :: proc(loader: ^Loader, trace: ^Trace, ui_state: ^UIState, program_name: string, program_path: string, program_args: string) -> bool {
 	if ui_state.loading_config || program_name == "" {
 		return false
 	}
@@ -150,6 +153,7 @@ start_sampling :: proc(loader: ^Loader, trace: ^Trace, ui_state: ^UIState, progr
 		trace = trace,
 		ui_state = ui_state,
 		program_name = program_name,
+		program_path = program_path,
 		program_args = program_args,
 	}
 
@@ -180,7 +184,8 @@ Cmd_Options :: struct {
 	file: string `args:"pos=0" usage:"Trace file to load"`,
 	terminal_mode: bool `args:"hidden, name=terminal-mode" usage:"Loads traces headlessly"`,
 	full_speed: bool `args:"hidden, name=full-speed" usage:"Disables power-limiter to max out framerate"`,
-	sample_path: string `args:name=sample-path" usage:"Sets sample path"`,
+	sample_exe: string `args:name=sample-exe" usage:"Sets sample exe path"`,
+	sample_path: string `args:name=sample-path" usage:"Sets sample exe target path"`,
 	sample_args: string `args:name=sample-args" usage:"Sets sample args"`,
 	exe_path: string `args:"name=exe-path" usage:"Overrides exe path for trace files"`,
 	pdb_path: string `args:"name=pdb-path" usage:"Overrides pdb path for trace files"`,
@@ -207,12 +212,16 @@ main :: proc() {
 
 	ui_state.textboxes[.ProgramInput] = init_textbox_state()
 	ui_state.textboxes[.CmdArgsInput] = init_textbox_state()
-	first := &ui_state.textboxes[.ProgramInput]
-	second := &ui_state.textboxes[.CmdArgsInput]
+	ui_state.textboxes[.PathInput] = init_textbox_state()
+	first  := &ui_state.textboxes[.ProgramInput]
+	second := &ui_state.textboxes[.PathInput]
+	third  := &ui_state.textboxes[.CmdArgsInput]
 	first.next = second
-	first.prev = second
-	second.next = first
+	first.prev = third
+	second.next = third
 	second.prev = first
+	third.next = first
+	third.prev = second
 
 	start_trace := ""
 	open_mode := UIMode.TraceView
@@ -225,13 +234,17 @@ main :: proc() {
 		if supports_sampling() {
 			open_mode = .MainMenu
 
+			if opt.sample_exe != "" {
+				strings.write_string(&first.b, opt.sample_exe)
+				first.cursor = len(opt.sample_exe)
+			}
 			if opt.sample_path != "" {
-				strings.write_string(&first.b, opt.sample_path)
-				first.cursor = len(opt.sample_path)
+				strings.write_string(&second.b, opt.sample_path)
+				second.cursor = len(opt.sample_path)
 			}
 			if opt.sample_args != "" {
-				strings.write_string(&second.b, opt.sample_args)
-				second.cursor = len(opt.sample_args)
+				strings.write_string(&third.b, opt.sample_args)
+				third.cursor = len(opt.sample_args)
 			}
 		}
 	}

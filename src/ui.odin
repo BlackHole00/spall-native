@@ -2485,6 +2485,9 @@ draw_main_menu :: proc(gfx: ^GFX_Context, trace: ^Trace, ui_state: ^UIState, dt:
 		}
 	}
 
+	path_input_box := &ui_state.textboxes[.PathInput]
+	draw_textbox(gfx, Rect{line_x, next_line(&line_y, form_h), form_w, form_h}, "Path to run program...", path_input_box)
+
 	cmdargs_input_box := &ui_state.textboxes[.CmdArgsInput]
 	draw_textbox(gfx, Rect{line_x, next_line(&line_y, form_h), form_w, form_h}, "Command line arguments...", cmdargs_input_box)
 
@@ -2494,9 +2497,10 @@ draw_main_menu :: proc(gfx: ^GFX_Context, trace: ^Trace, ui_state: ^UIState, dt:
 	start_sample_rect := Rect{line_x + (full_form_w / 2) - (sample_button_width / 2), line_y, sample_button_width, p_height + (em / 2)}
 	if button(gfx, start_sample_rect, sample_button_text, "", .DefaultFont, menu_rect.x, menu_rect.w) {
 		program_name := strings.to_string(program_input_box.b)
+		program_path := strings.to_string(path_input_box.b)
 		program_args := strings.to_string(cmdargs_input_box.b)
 
-		start_sampling(&loader, trace, ui_state, program_name, program_args)
+		start_sampling(&loader, trace, ui_state, program_name, program_path, program_args)
 	}
 }
 

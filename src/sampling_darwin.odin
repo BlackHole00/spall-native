@@ -128,30 +128,39 @@ sample_arm64_thread :: proc(my_task: darwin.task_t, child_task: darwin.task_t, t
     append(callstack, state.pc)
 	sample_thread.max_depth = max(sample_thread.max_depth, cur_depth)
 
+	fmt.printf("starting sample\n")
+	fp := state.fp
 	sp := state.sp
-	bp := state.fp
+	pc := state.pc
 	for {
+		fmt.printf("pc: %x | sp: %x | fp: %x\n", pc, sp, fp)
 
-		// If the base pointer is 0, we're at the top of the stack
-		if bp == 0 {
+		// If the frame pointer is 0, we're at the top of the stack
+		if fp == 0 {
 			return true
 		}
 
 		// base pointer should be aligned
-		if bp % 8 != 0 {
+		if fp % 8 != 0 {
 			return false
 		}
 
-		slot := map_child_mem(my_task, child_task, bp, u64) or_return
+		slot, ok := map_child_mem(my_task, child_task, fp, u64)
+		if !ok {
+			fmt.printf("failed to map mem: %x\n", fp)
+				return false
+		}
 
-		append(callstack, bp)
+		append(callstack, fp)
 		cur_depth += 1
 		sample_thread.max_depth = max(sample_thread.max_depth, cur_depth)
 
-		new_bp := slot^
-		unmap_child_mem(my_task, bp, slot)
+		new_fp := (^u64)(uintptr(slot))^
+		pc = (^u64)(uintptr(u64(uintptr(slot)) + 8))^
+		sp = u64(uintptr(slot) + 16)
+		unmap_child_mem(my_task, fp, slot)
 
-		bp = new_bp
+		fp = new_fp
 	}
 
     return true
@@ -258,8 +267,10 @@ process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 			}
 
 			j += int(cmd.size)
+			fmt.printf("path: %v | cmd: %v\n", file_path, cmd)
 		}
 
+    /*
 		exec_buffer, ok5 := os.read_entire_file_from_filename(file_path)
 		if !ok5 {
 			continue dylib_loop
@@ -288,6 +299,8 @@ process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 		if !load_macho_debug(trace, debug_buffer, bucket) {
 			continue dylib_loop
 		}
+
+    */
 	}
 
 	dyld_path_addr := u64(uintptr(rawptr(image_infos.dyld_path)))
@@ -348,7 +361,7 @@ MachSampleSetup :: struct {
 }
 
 sample_setup := MachSampleSetup{}
-sample_child :: proc(trace: ^Trace, program_name: string, args: []string) -> (ok: bool) {
+sample_child :: proc(trace: ^Trace, program_name: string, path: string, args: []string) -> (ok: bool) {
 	if !sample_setup.has_setup {
 		sample_setup.my_task = darwin.mach_task_self()
 		if darwin.mach_port_allocate(sample_setup.my_task, darwin.MACH_PORT_RIGHT_RECEIVE, &sample_setup.recv_port) != 0 {
@@ -389,6 +402,9 @@ sample_child :: proc(trace: ^Trace, program_name: string, args: []string) -> (ok
 	}
 
 	dir, err := os2.get_working_directory(context.temp_allocator)
+	if err != nil { return }
+
+	err = os2.set_working_directory(path)
 	if err != nil { return }
 
 	envs[i] = fmt.tprintf("DYLD_INSERT_LIBRARIES=%s/tools/osx_dylib_sample/%s", dir, "same.dylib")
@@ -448,6 +464,7 @@ sample_child :: proc(trace: ^Trace, program_name: string, args: []string) -> (ok
 		if !sample_task(trace, sample_setup.my_task, child_task, &sample_state) {
 			break
 		}
+		//if true { return }
 		time.sleep(1 * time.Millisecond)
 	}
 	trailing_ts := time.read_cycle_counter()
@@ -470,16 +487,7 @@ sample_child :: proc(trace: ^Trace, program_name: string, args: []string) -> (ok
 		}
     }
 
-    freq := 0
-    if ODIN_OS == .Darwin {
-        freq = int(get_frequency())
-    } else {
-        freq, ok := time.tsc_frequency()
-        if !ok {
-            fmt.printf("Failed to get frequency!\n")
-            return
-        }
-    }
+	freq := int(get_frequency())
 
 	trace.stamp_scale = ((1 / f64(freq)) * 1_000_000_000)
 

@@ -38,6 +38,7 @@ TextboxState :: struct {
 
 TextboxKind :: enum u8 {
 	ProgramInput,
+	PathInput,
 	CmdArgsInput,
 }
 
