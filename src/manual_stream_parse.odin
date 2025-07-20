@@ -266,7 +266,10 @@ ms_v2_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, th
 			args = in_get(&trace.intern, &trace.string_block, args),
 			duration = -1,
 			self_time = 0,
-			timestamp = i64(event.time),
+			timestamp = max(i64(event.time), thread.zero_patchup),
+		}
+		if ev.timestamp > thread.zero_patchup {
+			thread.zero_patchup = -1
 		}
 
 		if thread.max_time > ev.timestamp {
@@ -278,10 +281,10 @@ ms_v2_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, th
 
 		process.min_time = min(process.min_time, ev.timestamp)
 		thread.min_time = min(thread.min_time, ev.timestamp)
-		thread.max_time = ev.timestamp + ev.duration
+		thread.max_time = ev.timestamp
 
 		trace.total_min_time = min(trace.total_min_time, ev.timestamp)
-		trace.total_max_time = max(trace.total_max_time, ev.timestamp + ev.duration)
+		trace.total_max_time = max(trace.total_max_time, ev.timestamp)
 
 		if thread.current_depth >= len(thread.depths) {
 			depth := Depth{
@@ -306,6 +309,7 @@ ms_v2_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, th
 			return .PartialRead
 		}
 		event := (^spall_fmt.End_Event_V2)(raw_data(data_start))
+		event.time = u64(max(i64(event.time), thread.zero_patchup))
 
 		if thread.bande_q.len > 0 {
 			jev_idx := stack_pop_back(&thread.bande_q)
@@ -314,6 +318,15 @@ ms_v2_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, th
 			depth := &thread.depths[thread.current_depth]
 			jev := &depth.events[jev_idx]
 			jev.duration = i64(event.time) - jev.timestamp
+			if jev.duration == 0 {
+				if thread.zero_patchup == -1 {
+					thread.zero_patchup = i64(event.time)
+				}
+				thread.zero_patchup += 1
+				jev.duration = 1
+			} else {
+				thread.zero_patchup = -1
+			}
 			jev.self_time = jev.duration - jev.self_time
 			thread.max_time = max(thread.max_time, jev.timestamp + jev.duration)
 			trace.total_max_time = max(trace.total_max_time, jev.timestamp + jev.duration)
@@ -346,27 +359,24 @@ ms_v2_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, th
 	return .PartialRead
 }
 
-ms_v2_get_next_buffer :: proc(trace: ^Trace, chunk: []u8, buffer_header: ^spall_fmt.Buffer_Header) -> BinaryState {
+ms_v2_get_next_buffer :: proc(trace: ^Trace, chunk: []u8, buffer_header: ^spall_fmt.Manual_Buffer_Header) -> BinaryState {
 	p := &trace.parser
 
-	if chunk_pos(p) + size_of(spall_fmt.Buffer_Header) > i64(len(chunk)) {
+	if chunk_pos(p) + size_of(spall_fmt.Manual_Buffer_Header) > i64(len(chunk)) {
 		return .PartialRead
 	}
 
 	data_start := chunk[chunk_pos(p):]
-	tmp_header := (^spall_fmt.Buffer_Header)(raw_data(data_start))^
+	tmp_header := (^spall_fmt.Manual_Buffer_Header)(raw_data(data_start))^
 	buffer_header^ = tmp_header
 
-	p.pos += size_of(spall_fmt.Buffer_Header)
+	p.pos += size_of(spall_fmt.Manual_Buffer_Header)
 	return .EventRead
 }
 
 ms_v2_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
-	buffer_header := spall_fmt.Buffer_Header{}
+	buffer_header := spall_fmt.Manual_Buffer_Header{}
 	p := &trace.parser
-
-	proc_idx := setup_pid(trace, 0)
-	process := &trace.processes[proc_idx]
 
 	chunk_buffer := make([]u8, 4 * 1024 * 1024)
 	defer delete(chunk_buffer)
@@ -381,6 +391,7 @@ ms_v2_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 	full_chunk := chunk_buffer[:read_size]
 	buffer_loop: for p.pos < trace.total_size {
 		state := ms_v2_get_next_buffer(trace, full_chunk, &buffer_header)
+
 		#partial switch state {
 		case .PartialRead:
 			if p.pos == last_read {
@@ -403,6 +414,9 @@ ms_v2_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 		case .Failure:
 			return false
 		}
+
+		proc_idx := setup_pid(trace, buffer_header.pid)
+		process := &trace.processes[proc_idx]
 
 		thread_idx := setup_tid(trace, proc_idx, buffer_header.tid)
 		thread := &process.threads[thread_idx]

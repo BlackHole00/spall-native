@@ -10,18 +10,18 @@ import "core:os"
 import "core:math"
 import "formats:spall_fmt"
 
-as_get_next_buffer :: proc(trace: ^Trace, chunk: []u8, buffer_header: ^spall_fmt.Buffer_Header) -> BinaryState {
+as_get_next_buffer :: proc(trace: ^Trace, chunk: []u8, buffer_header: ^spall_fmt.Auto_Buffer_Header) -> BinaryState {
 	p := &trace.parser
 
-	if chunk_pos(p) + size_of(spall_fmt.Buffer_Header) > i64(len(chunk)) {
+	if chunk_pos(p) + size_of(spall_fmt.Auto_Buffer_Header) > i64(len(chunk)) {
 		return .PartialRead
 	}
 
 	data_start := chunk[chunk_pos(p):]
-	tmp_header := (^spall_fmt.Buffer_Header)(raw_data(data_start))^
+	tmp_header := (^spall_fmt.Auto_Buffer_Header)(raw_data(data_start))^
 	buffer_header^ = tmp_header
 
-	p.pos += size_of(spall_fmt.Buffer_Header)
+	p.pos += size_of(spall_fmt.Auto_Buffer_Header)
 	return .EventRead
 }
 
@@ -206,7 +206,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 }
 
 as_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
-	buffer_header := spall_fmt.Buffer_Header{}
+	buffer_header := spall_fmt.Auto_Buffer_Header{}
 	p := &trace.parser
 
 	proc_idx := setup_pid(trace, 0)

@@ -37,11 +37,11 @@ Auto_Event_Type :: enum u8 {
     End        = 2,
 }
 
-Buffer_Header :: struct #packed {
+Auto_Buffer_Header :: struct #packed {
 	size:      u32,
 	tid:       u32,
-    first_ts:  u64,
-    max_depth: u32,
+	first_ts:  u64,
+	max_depth: u32,
 }
 
 Auto_Begin_Event :: struct #packed {
@@ -49,6 +49,13 @@ Auto_Begin_Event :: struct #packed {
 	time:     u64,
 	name_len: u8,
 	args_len: u8,
+}
+
+Manual_Buffer_Header :: struct #packed {
+	size:      u32,
+	tid:       u32,
+	pid:       u32,
+	first_ts:  u64,
 }
 
 Begin_Event_V1 :: struct #packed {
@@ -70,7 +77,6 @@ End_Event_V1 :: struct #packed {
 
 Begin_Event_V2 :: struct #packed {
 	type:     Manual_Event_Type,
-	category: u8,
 	time:     u64,
 	name_len: u8,
 	args_len: u8,

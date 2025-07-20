@@ -154,7 +154,7 @@ SPALL_FN void spall_pause(void) {
 #elif SPALL_IS_ARM64
 SPALL_FN uint64_t spall_get_clock(void) {
     uint64_t timer_val;
-    asm volatile("isb; mrs %0, cntvct_el0; isb " : "=r"(timer_val) :: "memory");
+    asm volatile("mrs %0, cntvct_el0;" : "=r"(timer_val) :: "memory");
     return timer_val;
 }
 SPALL_FN void spall_pause(void) {

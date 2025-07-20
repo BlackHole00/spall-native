@@ -651,7 +651,7 @@ load_spall_file :: proc(loader: ^Loader, trace: ^Trace, file_name: string) {
 			return
 		}
 
-		if hdr.version != 1 && hdr.version != 2 {
+		if hdr.version != 1 && hdr.version != 3 {
 			post_error(trace, "Spall version %d for %s is invalid!", hdr.version, file_name)
 			return
 		}
@@ -662,7 +662,7 @@ load_spall_file :: proc(loader: ^Loader, trace: ^Trace, file_name: string) {
 		if hdr.version == 1 { 
 			file_type = .ManualStreamV1 
 			trace.stamp_scale *= 1000
-		} else if hdr.version == 2 {
+		} else if hdr.version == 3 {
 			file_type = .ManualStreamV2
 		}
 

@@ -372,6 +372,7 @@ Thread :: struct {
 	instants: [dynamic]Instant,
 
 	bande_q: Stack(int),
+	zero_patchup: i64,
 }
 
 Process :: struct {
@@ -413,6 +414,7 @@ get_proc_name :: proc(trace: ^Trace, process: ^Process) -> string {
 init_thread :: proc(thread_id: u32) -> Thread {
 	t := Thread{
 		min_time = max(i64), 
+		zero_patchup = -1,
 		id = thread_id,
 		in_stats = true,
 		events = make([dynamic]Event),
