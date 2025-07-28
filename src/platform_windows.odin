@@ -1,4 +1,4 @@
-//+build windows
+#+build windows
 package main
 
 import "core:strings"
@@ -64,5 +64,5 @@ demangle_symbol :: proc(name: string, tmp_buffer: []u8) -> (string, bool) {
 	return name, true
 }
 
-sample_child :: proc() -> (ok: bool) { return }
+sample_child :: proc(trace: ^Trace, program_name: string, path: string, args: []string) -> (ok: bool) { return }
 supports_sampling :: proc() -> (ok: bool) { return }

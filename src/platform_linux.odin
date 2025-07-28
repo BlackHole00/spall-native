@@ -1,4 +1,4 @@
-//+build linux
+#+build linux
 package main
 
 import "core:c"
@@ -743,5 +743,5 @@ demangle_symbol :: proc(name: string, tmp_buffer: []u8) -> (string, bool) {
 	return string(ret_str), true
 }
 
-sample_child :: proc() -> (ok: bool) { return }
+sample_child :: proc(trace: ^Trace, program_name: string, path: string, args: []string) -> (ok: bool) { return }
 supports_sampling :: proc() -> (ok: bool) { return }
