@@ -1,1 +1,1 @@
-clang -o stats -g -O3 main.c
+clang -o stats -g -fno-omit-frame-pointer main.c

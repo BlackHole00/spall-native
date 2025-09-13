@@ -1,4 +1,4 @@
-//+build linux
+#+build linux
 package main
 
 import "core:c"
@@ -305,7 +305,7 @@ create_context :: proc(title: cstring, width, height: int) -> (GFX_Context, f64,
 	{
 		major : i32 = 0
 		minor : i32 = 0
-		if egl.Initialize(egl_display, &major, &minor) == 0 {
+		if !egl.Initialize(egl_display, &major, &minor) {
 			fmt.printf("Failed to init EGL display!\n")
 			os.exit(1)
 		}
@@ -315,7 +315,7 @@ create_context :: proc(title: cstring, width, height: int) -> (GFX_Context, f64,
 			os.exit(1)
 		}
 
-		if egl.BindAPI(egl.OPENGL_API) == 0 {
+		if !egl.BindAPI(egl.OPENGL_API) {
 			fmt.printf("Failed to select OpenGL API!\n")
 			os.exit(1)
 		}
@@ -339,7 +339,7 @@ create_context :: proc(title: cstring, width, height: int) -> (GFX_Context, f64,
 		}
 
 		count : i32 = 0
-		if egl.ChooseConfig(egl_display, raw_data(&attr), &config, 1, &count) == 0 || count != 1 {
+		if !egl.ChooseConfig(egl_display, raw_data(&attr), &config, 1, &count) || count != 1 {
 			fmt.printf("Can't choose provided EGL config\n")
 			os.exit(1)
 		}
@@ -743,4 +743,5 @@ demangle_symbol :: proc(name: string, tmp_buffer: []u8) -> (string, bool) {
 	return string(ret_str), true
 }
 
-sample_child :: proc() -> (ok: bool) { return }
+sample_child :: proc(trace: ^Trace, program_name: string, path: string, args: []string) -> (ok: bool) { return }
+supports_sampling :: proc() -> (ok: bool) { return }

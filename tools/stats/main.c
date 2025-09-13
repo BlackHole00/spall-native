@@ -265,11 +265,6 @@ int main(int argc, char **argv) {
 			break;
 		}
 
-		printf("size:  0x%08x\n", bhdr->size);
-		printf("tid:   %u\n", bhdr->tid);
-		printf("ts:    %llu\n", bhdr->first_ts);
-		printf("depth: %u\n", bhdr->max_depth);
-
 		Thread *thread = NULL;
 		for (int i = 0; i < threads.size; i++) {
 			Thread *t = &threads.arr[i];
@@ -414,5 +409,5 @@ int main(int argc, char **argv) {
 		}
 	}
 
-	printf("Got %llu events\n", event_count);
+	//printf("Got %llu events\n", event_count);
 }

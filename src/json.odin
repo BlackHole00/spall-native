@@ -21,7 +21,7 @@ TmpKey :: struct {
 	end: i64,
 }
 
-Sample :: struct {
+JS_Sample :: struct {
 	node_id: i64,
 	event_idx: i64,
 }
@@ -38,7 +38,7 @@ ProfileState :: struct {
 	tid: u32,
 	time: i64,
 	nodes: map[i64]SampleNode,
-	id_stack: Stack(Sample),
+	id_stack: Stack(JS_Sample),
 }
 
 JSONParser :: struct {
@@ -554,7 +554,7 @@ process_sample :: proc(trace: ^Trace, jp: ^JSONParser, ev: ^TempEvent) -> bool {
 
 				_, _, e_idx := json_push_event(trace, ev.process_id, ev.thread_id, &new_event)
 
-				sample := Sample{node_id = cur_sample_id, event_idx = i64(e_idx)}
+				sample := JS_Sample{node_id = cur_sample_id, event_idx = i64(e_idx)}
 				stack_push_back(&profile.id_stack, sample)
 			} else {
 				// changing to a new stack
@@ -615,7 +615,7 @@ process_sample :: proc(trace: ^Trace, jp: ^JSONParser, ev: ^TempEvent) -> bool {
 					new_event.timestamp = profile.time
 
 					_, _, e_idx := json_push_event(trace, ev.process_id, ev.thread_id, &new_event)
-					sample := Sample{node_id = node_id, event_idx = i64(e_idx)}
+					sample := JS_Sample{node_id = node_id, event_idx = i64(e_idx)}
 					stack_push_back(&profile.id_stack, sample)
 				}
 			}

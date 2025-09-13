@@ -599,7 +599,7 @@ parse_dynamic :: proc(ctx: ^ELF_Context, blob: []u8) -> (ELF_Dynamic, bool) {
 
 }
 
-load_elf :: proc(trace: ^Trace, binary_blob: []u8) -> bool {
+load_elf :: proc(trace: ^Trace, binary_blob: []u8, bucket: ^Func_Bucket) -> bool {
 	pre_hdr, rk := slice_to_type(binary_blob, ELF_Pre_Header)
 	if !rk {
 		return false
@@ -732,7 +732,7 @@ load_elf :: proc(trace: ^Trace, binary_blob: []u8) -> bool {
 			return false
 		}
 		sym_idx := in_get(&trace.intern, &trace.string_block, demangled_name)
-		non_zero_append(&trace.functions, Function{name = sym_idx, low_pc = u64(symbol.value), high_pc = u64(symbol.value)})
+		non_zero_append(&bucket.functions, Function{name = sym_idx, low_pc = u64(symbol.value), high_pc = u64(symbol.value)})
 	}
 
 	// This is apparently a thing in Old Linux?
@@ -743,11 +743,11 @@ load_elf :: proc(trace: ^Trace, binary_blob: []u8) -> bool {
 
 	if !use_aslr {
 		fmt.printf("ELF: Your binary is not relocatable, disabling ASLR correction\n")
-		trace.base_address = 0
+		bucket.base_address = 0
 	}
 
 	// Start parsing DWARF normally from here
-	if !load_dwarf(trace, &sections) {
+	if !load_dwarf(trace, &sections, bucket, 0) {
 		fmt.printf("DWARF parsing failed!\n")
 	}
 

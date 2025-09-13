@@ -1,4 +1,4 @@
-//+build darwin, windows
+#+build darwin, windows
 package main
 
 import "core:fmt"
@@ -73,7 +73,7 @@ _resolve_key :: proc(code: SDL.Keycode) -> KeyType {
 		case .RETURN:     return .Return
 		case .TAB:        return .Tab
 		case .SPACE:      return .Space
-		case .BACKSPACE:  return .Delete
+		case .BACKSPACE:  return .Backspace
 		case .ESCAPE:     return .Escape
 		case .CAPSLOCK:   return .CapsLock
 
@@ -293,6 +293,11 @@ get_next_event :: proc(gfx: ^GFX_Context, wait: bool) -> PlatformEvent {
 					return PlatformEvent{type = .Resize, w = w, h = h}
 				}
 			}
+		}
+		case .TEXTINPUT: {
+			r_une := string(cstring(rawptr(&event.text.text)))
+			rune_str := strings.clone(r_une)
+			return PlatformEvent{type = .Rune, str = rune_str}
 		}
 	}
 

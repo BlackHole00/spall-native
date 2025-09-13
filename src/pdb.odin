@@ -202,7 +202,7 @@ Line :: struct {
 	inline: bool,
 }
 
-load_pdb :: proc(trace: ^Trace, section_buffer: []u8, pdb_buffer: []u8) -> bool {
+load_pdb :: proc(trace: ^Trace, section_buffer: []u8, pdb_buffer: []u8, bucket: ^Func_Bucket) -> bool {
 	msf_hdr := slice_to_type(pdb_buffer, PDB_MSF_Header) or_return
 	if !bytes.equal(msf_hdr.magic[:], PDB_MAGIC) {
 		return false
@@ -329,12 +329,12 @@ load_pdb :: proc(trace: ^Trace, section_buffer: []u8, pdb_buffer: []u8) -> bool 
 					proc_symbol := slice_to_type(symbol_stream[cur_offset:], CV_Proc32) or_return
 					symbol_name := string(cstring(raw_data(symbol_stream[cur_offset+size_of(CV_Proc32):])))
 
-					base_addr := base_address_for_section(section_buffer, proc_symbol.section_idx - 1) or_return
+					sect_base_addr := base_address_for_section(section_buffer, proc_symbol.section_idx - 1) or_return
 
-					low_pc := base_addr + u64(proc_symbol.offset)
+					low_pc := sect_base_addr + u64(proc_symbol.offset)
 					high_pc := low_pc + u64(proc_symbol.proc_length)
 					sym_idx := in_get(&trace.intern, &trace.string_block, symbol_name)
-					non_zero_append(&trace.functions, Function{name = sym_idx, low_pc = low_pc, high_pc = high_pc})
+					add_func(bucket, sym_idx, low_pc, high_pc, 0)
 				}
 			}
 
@@ -370,8 +370,8 @@ load_pdb :: proc(trace: ^Trace, section_buffer: []u8, pdb_buffer: []u8) -> bool 
 			#partial switch dbg_hdr.type {
 				case .Lines: {
 					lines_hdr := slice_to_type(symbol_stream[cur_offset:], PDB_Line_Header)
-					base_addr := base_address_for_section(section_buffer, lines_hdr.index - 1) or_return
-					line_addr := base_addr + u64(lines_hdr.offset)
+					sect_base_addr := base_address_for_section(section_buffer, lines_hdr.index - 1) or_return
+					line_addr := sect_base_addr + u64(lines_hdr.offset)
 					cur_offset += size_of(PDB_Line_Header)
 
 					for lfb_count := 0; cur_offset < end_offset; lfb_count += 1 {
@@ -391,7 +391,7 @@ load_pdb :: proc(trace: ^Trace, section_buffer: []u8, pdb_buffer: []u8) -> bool 
 								panic("Out of Memory!\n")
 							}
 
-							non_zero_append(&trace.line_info, Line_Info{line_addr + u64(line.offset), u64(line_num), interned_name})
+							non_zero_append(&bucket.line_info, Line_Info{line_addr + u64(line.offset), u64(line_num), interned_name})
 							cur_offset += size_of(PDB_Line)
 						}
 

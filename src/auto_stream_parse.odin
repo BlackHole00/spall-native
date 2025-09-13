@@ -10,18 +10,18 @@ import "core:os"
 import "core:math"
 import "formats:spall_fmt"
 
-as_get_next_buffer :: proc(trace: ^Trace, chunk: []u8, buffer_header: ^spall_fmt.Buffer_Header) -> BinaryState {
+as_get_next_buffer :: proc(trace: ^Trace, chunk: []u8, buffer_header: ^spall_fmt.Auto_Buffer_Header) -> BinaryState {
 	p := &trace.parser
 
-	if chunk_pos(p) + size_of(spall_fmt.Buffer_Header) > i64(len(chunk)) {
+	if chunk_pos(p) + size_of(spall_fmt.Auto_Buffer_Header) > i64(len(chunk)) {
 		return .PartialRead
 	}
 
 	data_start := chunk[chunk_pos(p):]
-	tmp_header := (^spall_fmt.Buffer_Header)(raw_data(data_start))^
+	tmp_header := (^spall_fmt.Auto_Buffer_Header)(raw_data(data_start))^
 	buffer_header^ = tmp_header
 
-	p.pos += size_of(spall_fmt.Buffer_Header)
+	p.pos += size_of(spall_fmt.Auto_Buffer_Header)
 	return .EventRead
 }
 
@@ -69,7 +69,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 		id        := current_addr^
 		caller_id := current_caller^
 		timestamp := current_time^
-
+		timestamp = max(timestamp, thread.zero_patchup)
 
 		if thread.max_time > timestamp {
 			post_error(trace, 
@@ -111,6 +111,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 		dt := pull_uval(chunk[chunk_pos(p)+i:], int(dt_size)); i += dt_size
 
 		ts := current_time^ + i64(dt)
+		ts = max(ts, thread.zero_patchup)
 
 		if thread.bande_q.len > 0 {
 			jev_idx := stack_pop_back(&thread.bande_q)
@@ -119,6 +120,11 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 			depth := &thread.depths[thread.current_depth]
 			jev := &depth.events[jev_idx]
 			jev.duration = ts - jev.timestamp
+			if jev.duration == 0 {
+				thread.zero_patchup = ts
+				thread.zero_patchup += 1
+				jev.duration = 1
+			}
 			jev.self_time = jev.duration - jev.self_time
 
 			thread.max_time      = max(thread.max_time, jev.timestamp + jev.duration)
@@ -166,6 +172,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 
 			current_time^ = current_time^ + i64(dt)
 			timestamp := current_time^
+			timestamp = max(timestamp, thread.zero_patchup)
 
 			if thread.max_time > timestamp {
 				post_error(trace, 
@@ -206,7 +213,7 @@ as_parse_next_event :: proc(trace: ^Trace, chunk: []u8, process: ^Process, threa
 }
 
 as_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
-	buffer_header := spall_fmt.Buffer_Header{}
+	buffer_header := spall_fmt.Auto_Buffer_Header{}
 	p := &trace.parser
 
 	proc_idx := setup_pid(trace, 0)
@@ -214,7 +221,6 @@ as_parse :: proc(trace: ^Trace, fd: os.Handle, header_size: i64) -> bool {
 
 	chunk_buffer := make([]u8, 4 * 1024 * 1024)
 	defer delete(chunk_buffer)
-
 
 	read_size, err := os.read_at(fd, chunk_buffer, 0)
 	if err != nil {

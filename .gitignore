@@ -3,6 +3,9 @@ bin
 *.swp
 .DS_Store
 *.zip
+*.dSYM
+
+src/freq.a
 
 spall_pkg
 collect_builds.sh

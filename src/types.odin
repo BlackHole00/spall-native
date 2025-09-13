@@ -2,6 +2,7 @@ package main
 
 import "core:fmt"
 import "core:strings"
+import "core:time"
 
 Vec2 :: [2]f64
 FVec2 :: [2]f32
@@ -37,6 +38,7 @@ TextboxState :: struct {
 
 TextboxKind :: enum u8 {
 	ProgramInput,
+	PathInput,
 	CmdArgsInput,
 }
 
@@ -50,6 +52,8 @@ init_textbox_state :: proc() -> TextboxState {
 
 UIMode :: enum {
 	MainMenu,
+	SampleRunning,
+	TraceLoading,
 	TraceView,
 }
 
@@ -295,6 +299,13 @@ CU_File_Entry :: struct {
 	file_idx: u64,
 }
 
+Func_Bucket :: struct {
+	source_path: string,
+	base_address: u64,
+	functions: [dynamic]Function,
+	line_info: [dynamic]Line_Info,
+}
+
 COLOR_CHOICES :: 64
 Trace :: struct {
 	file_name: string,
@@ -304,11 +315,9 @@ Trace :: struct {
 	intern: INMap,
 	string_block: [dynamic]string,
 
-	base_address:                u64,
 	skew_size:                   u64,
 	filename_map:     strings.Intern,
-	line_info:    [dynamic]Line_Info,
-	functions:     [dynamic]Function,
+	func_buckets: [dynamic]Func_Bucket,
 
 	color_choices: [COLOR_CHOICES]FVec3,
 
@@ -325,6 +334,8 @@ Trace :: struct {
 	stats: Stats,
 	zoom_event: EventID,
 
+	load_kickoff: time.Tick,
+	requested_stop: bool,
 	error_message: string,
 	error_storage: [4096]u8,
 }
@@ -361,6 +372,7 @@ Thread :: struct {
 	instants: [dynamic]Instant,
 
 	bande_q: Stack(int),
+	zero_patchup: i64,
 }
 
 Process :: struct {
@@ -402,6 +414,7 @@ get_proc_name :: proc(trace: ^Trace, process: ^Process) -> string {
 init_thread :: proc(thread_id: u32) -> Thread {
 	t := Thread{
 		min_time = max(i64), 
+		zero_patchup = -1,
 		id = thread_id,
 		in_stats = true,
 		events = make([dynamic]Event),

@@ -142,7 +142,7 @@ get_pdb_path :: proc(rdr: ^Stream_Context, section_hdr: COFF_Section_Header, deb
 	return string(pdb_cstr), true
 }
 
-load_pe32 :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
+load_pe32 :: proc(trace: ^Trace, exec_buffer: []u8, bucket: ^Func_Bucket) -> bool {
 	pdb_path := ""
 	dos_end_offset := 0x3c
 
@@ -221,7 +221,7 @@ load_pe32 :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 	}
 	if !use_aslr {
 		fmt.printf("PE32: Your binary is not relocatable, disabling ASLR correction\n")
-		trace.base_address = 0
+		bucket.base_address = 0
 	}
 
 	// I think we've got a PDB file
@@ -233,10 +233,10 @@ load_pe32 :: proc(trace: ^Trace, exec_buffer: []u8) -> bool {
 		pdb_buffer := os.read_entire_file_from_filename(pdb_path) or_return
 		defer delete(pdb_buffer)
 
-		return load_pdb(trace, section_buffer, pdb_buffer)
+		return load_pdb(trace, section_buffer, pdb_buffer, bucket)
 
 	// Do we have DWARF?
 	} else {
-		return load_dwarf(trace, &sections)
+		return load_dwarf(trace, &sections, bucket, 0)
 	}
 }

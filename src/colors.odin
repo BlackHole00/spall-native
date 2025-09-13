@@ -123,11 +123,9 @@ set_color_mode :: proc(auto: bool, is_dark: bool) {
 }
 
 // color_choices must be power of 2
-name_color_idx :: proc(name_idx: u64) -> u64 {
-	idx := name_idx
-	k := transmute([]u8)([^]u64)(&idx)[:size_of(idx)]
-
-	ret := #force_inline hash.murmur32(k)
+name_color_idx :: proc(name: string) -> u64 {
+	name_bytes := transmute([]u8)name
+	ret := #force_inline hash.murmur32(name_bytes)
 	return u64(ret) & u64(COLOR_CHOICES - 1)
 }
 
