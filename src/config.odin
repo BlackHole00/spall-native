@@ -657,6 +657,8 @@ load_file :: proc(loader: ^Loader, trace: ^Trace, file_name: string) {
 		}
 	}
 
+	fmt.printf("Loading trace with %v format!\n", file_type)
+
 	p := &trace.parser
 	p.pos += i64(header_size)
 
