@@ -29,5 +29,5 @@ cp resources/info.plist $APP_PATH/Contents/.
 cp resources/icon.icns $APP_PATH/Contents/resources/.
 cp $SDL_PATH $APP_PATH/Contents/Frameworks/.
 
-SDL_DYLIB_PATH=$(otool -L $APP_PATH/Contents/MacOS/spall | grep "SDL" | awk -F '.dylib' '{print $1}' | awk '{$1=$1};1')
+SDL_DYLIB_PATH=$(otool -L $APP_PATH/Contents/MacOS/spall | grep -m 1 "SDL" | awk -F '.dylib' '{print $1}' | awk '{$1=$1};1')
 install_name_tool -change $SDL_DYLIB_PATH @executable_path/../Frameworks/libSDL2-2.0.0.dylib $APP_PATH/Contents/MacOS/spall
