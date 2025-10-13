@@ -514,6 +514,9 @@ draw_header :: proc(gfx: ^GFX_Context, trace: ^Trace, ui_state: ^UIState) {
 		if button(gfx, Rect{ui_state.width - edge_pad - ((button_width * 2) + (button_pad)), (header_rect.h / 2) - (button_height / 2), button_width, button_height}, "\uf188", "toggle debug mode", .IconFont, 0, ui_state.width) {
 			enable_debug = !enable_debug
 		}
+		if button(gfx, Rect{ui_state.width - edge_pad - ((button_width * 3) + (button_pad * 2)), (header_rect.h / 2) - (button_height / 2), button_width, button_height}, "\uf1fc", "regenerate colors", .IconFont, 0, ui_state.width) {
+			generate_color_choices(trace, true)
+		}
 	}
 }
 

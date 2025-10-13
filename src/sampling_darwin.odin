@@ -607,7 +607,7 @@ sample_child :: proc(trace: ^Trace, program_name: string, path: string, args: []
 	}
 	fmt.printf("Sampled %v events\n", trace.event_count)
 
-	generate_color_choices(trace)
+	generate_color_choices(trace, false)
 	chunk_events(trace)
 
 	return true

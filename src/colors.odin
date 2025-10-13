@@ -130,7 +130,7 @@ name_color_idx :: proc(name: string) -> u64 {
 }
 
 
-generate_color_choices :: proc(trace: ^Trace) {
+generate_color_choices :: proc(trace: ^Trace, use_random: bool) {
 /*
 	trace.color_choices = [COLOR_CHOICES]FVec3{
 		FVec3{168,0,0}, FVec3{140,54,0}, FVec3{99,75,0},
@@ -158,28 +158,29 @@ generate_color_choices :: proc(trace: ^Trace) {
 		trace.color_choices[i] = trace.color_choices[i - presets]
 	}
 */
-	trace.color_choices[0] = hex_to_fvec(0x6faadc)
-	trace.color_choices[1] = hex_to_fvec(0xF1B212)
-	trace.color_choices[2] = hex_to_fvec(0x8bd124)
-	trace.color_choices[3] = hex_to_fvec(0xae74da)
-	trace.color_choices[4] = hex_to_fvec(0xf07481)
-	presets := 5
-	for i := presets; i < COLOR_CHOICES; i += 1 {
-		trace.color_choices[i] = trace.color_choices[i - presets]
-	}
 
-/*
-	for i := 0; i < COLOR_CHOICES; i += 1 {
-		h := rand.float32() * 0.5 + 0.5
-		h *= h
-		h *= h
-		h *= h
-		s := 0.5 + rand.float32() * 0.1
-		v : f32 = 0.85
+	if !use_random {
+		trace.color_choices[0] = hex_to_fvec(0x6faadc)
+		trace.color_choices[1] = hex_to_fvec(0xF1B212)
+		trace.color_choices[2] = hex_to_fvec(0x8bd124)
+		trace.color_choices[3] = hex_to_fvec(0xae74da)
+		trace.color_choices[4] = hex_to_fvec(0xf07481)
+		presets := 5
+		for i := presets; i < COLOR_CHOICES; i += 1 {
+			trace.color_choices[i] = trace.color_choices[i - presets]
+		}
+	} else {
+		for i := 0; i < COLOR_CHOICES; i += 1 {
+			h := rand.float32() * 0.5 + 0.5
+			h *= h
+			h *= h
+			h *= h
+			s := 0.5 + rand.float32() * 0.1
+			v : f32 = 0.85
 
-		trace.color_choices[i] = hsv2rgb(FVec3{h, s, v}) * 255
+			trace.color_choices[i] = hsv2rgb(FVec3{h, s, v}) * 255
+		}
 	}
-*/
 }
 
 hsv2rgb :: proc(c: FVec3) -> FVec3 {

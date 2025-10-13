@@ -807,7 +807,7 @@ load_spall_file :: proc(loader: ^Loader, trace: ^Trace, file_name: string) {
 	}
 	fmt.printf("parse config -- %f ms\n", time.duration_milliseconds(time.tick_since(start_time)))
 	
-	generate_color_choices(trace)
+	generate_color_choices(trace, false)
 
 	start_time = time.tick_now()
 	chunk_events(trace)
