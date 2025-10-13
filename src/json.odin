@@ -1139,7 +1139,7 @@ json_generate_selftimes :: proc(trace: ^Trace) {
 						}
 
 						if cur_node.start_time >= start_time && cur_node.end_time <= end_time {
-							child_time += cur_node.weight
+							child_time += cur_node.total_weight
 							continue
 						}
 

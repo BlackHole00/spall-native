@@ -177,7 +177,7 @@ get_text_height :: proc(scale: FontSize, font: FontType) -> f64 {
 	push_fatal(SpallError.Bug)
 }
 
-rm_text_cache :: proc(key: LRU_Key, value: LRU_Text, udata: rawptr) {
+rm_text_cache :: proc(key: Font_LRU_Key, value: Font_LRU_Text, udata: rawptr) {
 	handle := value.handle
 
 	delete(key.str)
@@ -200,8 +200,8 @@ alpha_blit :: proc(dst, src: IRect, src_stride: i32, output: []u8, input: []u8) 
 	}
 }
 
-get_text_cache :: proc(str: string, scale: FontSize, font_type: FontType) -> LRU_Text {
-	text_blob, ok := lru.get(&lru_text_cache, LRU_Key{ scale, font_type, str })
+get_text_cache :: proc(str: string, scale: FontSize, font_type: FontType) -> Font_LRU_Text {
+	text_blob, ok := lru.get(&lru_text_cache, Font_LRU_Key{ scale, font_type, str })
 	if !ok {
 		long_str := strings.clone(str)
 
@@ -279,8 +279,8 @@ get_text_cache :: proc(str: string, scale: FontSize, font_type: FontType) -> LRU
 		delete(output)
 		delete(output32)
 
-		text_blob = LRU_Text{ handle, width, height }
-		lru.set(&lru_text_cache, LRU_Key{ scale, font_type, long_str }, text_blob)
+		text_blob = Font_LRU_Text{ handle, width, height }
+		lru.set(&lru_text_cache, Font_LRU_Key{ scale, font_type, long_str }, text_blob)
 		cache_misses_this_frame += 1
 	} else {
 		cache_hits_this_frame += 1

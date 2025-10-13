@@ -3,6 +3,7 @@ package main
 import "core:fmt"
 import "core:strings"
 import "core:time"
+import "core:container/lru"
 
 Vec2 :: [2]f64
 FVec2 :: [2]f32
@@ -134,13 +135,13 @@ FontType :: enum u8 {
 	LastFont,
 }
 
-LRU_Key :: struct #packed {
+Font_LRU_Key :: struct #packed {
 	size: FontSize,
 	type: FontType,
 	str: string,
 }
 
-LRU_Text :: struct {
+Font_LRU_Text :: struct {
 	handle: u32,
 	width: i32,
 	height: i32,
@@ -348,16 +349,23 @@ Trace :: struct {
 	requested_stop: bool,
 	error_message: string,
 	error_storage: [4096]u8,
+
+	func_lookup_cache: lru.Cache(u64, u64),
 }
 
 BUCKET_SIZE :: 32
 CHUNK_NARY_WIDTH :: 4
+WEIGHT_COUNT :: 2
+WeightIdx :: struct {
+	idx: u8,
+	weight: i64,
+}
 ChunkNode :: struct #packed {
 	start_time: i64,
 	end_time: i64,
 
-	avg_color: FVec3,
-	weight: i64,
+	total_weight: i64,
+	p: [WEIGHT_COUNT]WeightIdx,
 }
 Depth :: struct {
 	tree: []ChunkNode,

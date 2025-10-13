@@ -10,6 +10,7 @@ import "core:time"
 import "core:path/filepath"
 import "core:mem"
 import "core:strings"
+import "core:container/lru"
 
 import "formats:spall_fmt"
 
@@ -148,6 +149,8 @@ free_trace :: proc(trace: ^Trace) {
 		delete(bucket.line_info)
 	}
 	delete(trace.func_buckets)
+
+	lru.destroy(&trace.func_lookup_cache, false)
 }
 
 bound_duration :: proc(ev: ^Event, max_ts: i64) -> i64 {
@@ -206,6 +209,21 @@ append_event :: proc(events: ^[dynamic]Event, ev: ^Event, loc := #caller_locatio
 	return
 }
 
+get_top_two :: proc(weights: []i64) -> (WeightIdx, WeightIdx) {
+	largest := WeightIdx{}
+	second_largest := WeightIdx{}
+	for weight, idx in weights {
+		if weight > largest.weight {
+			second_largest = largest
+			largest = WeightIdx{idx = u8(idx), weight = weight}
+		} else if weight < largest.weight && weight > second_largest.weight {
+			second_largest = WeightIdx{idx = u8(idx), weight = weight}
+		}
+	}
+
+	return largest, second_largest
+}
+
 gen_event_color :: proc(trace: ^Trace, _events: []Event, thread_max: i64, node: ^ChunkNode) {
 	total_weight : i64 = 0
 
@@ -215,16 +233,14 @@ gen_event_color :: proc(trace: ^Trace, _events: []Event, thread_max: i64, node: 
 		ev := &events[0]
 		duration := bound_duration(ev, thread_max)
 		name := ev_name(trace, ev)
-		idx := name_color_idx(name)
-		node.avg_color = trace.color_choices[idx]
 
 		// if the event was started with no end, *right* as the trace quit, we'll get a duration of 0
 		// make this 1 so it has *some* LOD contribution
-		node.weight = max(duration, 1)
+		node.total_weight = max(duration, 1)
+		node.p[0] = WeightIdx{idx = u8(name_color_idx(name)), weight = node.total_weight}
 		return
 	}
 
-	color := FVec3{}
 	color_weights := [COLOR_CHOICES]i64{}
 	for &ev in events {
 		name := ev_name(trace, &ev)
@@ -235,15 +251,11 @@ gen_event_color :: proc(trace: ^Trace, _events: []Event, thread_max: i64, node: 
 		total_weight += duration
 	}
 
-	weights_sum : i64 = 0
-	for weight, idx in color_weights {
-		color += trace.color_choices[idx] * f32(weight)
-		weights_sum += weight
-	}
-	color /= f32(weights_sum)
+	w1, w2 := get_top_two(color_weights[:])
 
-	node.avg_color = color
-	node.weight = total_weight
+	node.p[0] = w1
+	node.p[1] = w2
+	node.total_weight = total_weight
 }
 
 print_tree :: proc(depth: ^Depth) {
@@ -260,7 +272,7 @@ print_tree :: proc(depth: ^Depth) {
 		tree_idx := tree_stack[stack_len]
 		cur_node := &depth.tree[tree_idx]
 
-		fmt.printf("%d | start: %v, end: %v, weight: %v\n", tree_idx, cur_node.start_time, cur_node.end_time, cur_node.weight)
+		fmt.printf("%d | start: %v, end: %v, weight: %v\n", tree_idx, cur_node.start_time, cur_node.end_time, cur_node.total_weight)
 
 		if tree_idx > (len(depth.tree) - depth.leaf_count - 1) {
 			continue
@@ -366,7 +378,6 @@ chunk_events :: proc(trace: ^Trace) {
 				}
 
 				//fmt.printf("blending colors for %v nodes\n", tree_start_idx - 1)
-				avg_color := FVec3{}
 				for i := tree_start_idx - 1; i >= 0; i -= 1 {
 					node := &tree[i]
 
@@ -376,12 +387,17 @@ chunk_events :: proc(trace: ^Trace) {
 					node.start_time = tree[start_idx].start_time
 					node.end_time   = tree[end_idx].end_time
 
-					avg_color = {}
-					for j := start_idx; j <= end_idx; j += 1 {
-						avg_color += tree[j].avg_color * f32(tree[j].weight)
-						node.weight += tree[j].weight
+					color_weights := [COLOR_CHOICES]i64{}
+					children := tree[start_idx:end_idx]
+					for child in children {
+						node.total_weight += child.total_weight
+						for wi in child.p {
+							color_weights[wi.idx] += wi.weight
+						}
 					}
-					node.avg_color = avg_color / f32(node.weight)
+					w1, w2 := get_top_two(color_weights[:])
+					node.p[0] = w1
+					node.p[1] = w2
 				}
 			}
 		}
@@ -602,6 +618,8 @@ init_trace_allocs :: proc(trace: ^Trace, file_name: string) {
 
 	strings.intern_init(&trace.filename_map)
 	non_zero_append(&trace.string_block, "")
+
+	lru.init(&trace.func_lookup_cache, 4096)
 }
 
 init_trace :: proc(trace: ^Trace) {
@@ -867,8 +885,13 @@ find_next_scope :: proc(scopes: ^[dynamic]Scope, addr: u64) -> (^Scope, bool) {
 }
 
 get_function :: proc(trace: ^Trace, addr: u64) -> (u64, bool) {
-	cur_bucket, ok := get_bucket(trace, addr)
-	if !ok {
+	name_idx, ok := lru.get(&trace.func_lookup_cache, addr)
+	if ok {
+		return name_idx, true
+	}
+
+	cur_bucket, ok2 := get_bucket(trace, addr)
+	if !ok2 {
 		return 0, false
 	}
 
@@ -898,7 +921,9 @@ get_function :: proc(trace: ^Trace, addr: u64) -> (u64, bool) {
 		return 0, false
 	}
 
-	return cur_bucket.functions[cur_scope.func_idx].name, true
+	name_idx = cur_bucket.functions[cur_scope.func_idx].name
+	lru.set(&trace.func_lookup_cache, addr, name_idx)
+	return name_idx, true
 }
 
 get_line_info :: proc(trace: ^Trace, addr: u64) -> (string, u64, bool) {

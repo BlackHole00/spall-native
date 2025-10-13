@@ -75,7 +75,7 @@ thread_gap: f64 = 8
 build_hash := 0
 enable_debug := false
 fps_history: queue.Queue(f64)
-lru_text_cache: lru.Cache(LRU_Key, LRU_Text)
+lru_text_cache: lru.Cache(Font_LRU_Key, Font_LRU_Text)
 
 
 fullscreen := false

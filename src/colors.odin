@@ -221,3 +221,15 @@ adjust :: proc(c: FVec3, by: f32) -> FVec3 {
 	b := max(min(255, c.b + by), 0)
 	return FVec3{r, g, b}
 }
+
+get_node_color :: proc(trace: ^Trace, node: ^ChunkNode) -> FVec3 {
+	avg_color := FVec3{}
+	collected_weight : i64 = 0
+	for wi, idx in node.p {
+		avg_color += trace.color_choices[wi.idx] * f32(wi.weight)
+		collected_weight += wi.weight
+	}
+	avg_color /= f32(collected_weight)
+
+	return avg_color
+}

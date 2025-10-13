@@ -797,8 +797,8 @@ draw_flamegraphs :: proc(gfx: ^GFX_Context, trace: ^Trace, start_time, end_time:
 						r_y := cur_y + y
 						dr  := Rect{r_x, r_y, end_x - r_x, h}
 
-						rect_color := cur_node.avg_color
-						grey := greyscale(cur_node.avg_color)
+						rect_color := get_node_color(trace, cur_node)
+						grey := greyscale(rect_color)
 						if ui_state.multiselecting {
 							if found_rid != -1 {
 								range := trace.stats.selected_ranges[found_rid]   
@@ -1162,8 +1162,8 @@ draw_minimap :: proc(gfx: ^GFX_Context, trace: ^Trace, ui_state: ^UIState) {
 						r_x    = max(r_x, 0)
 						r_w   := end_x - r_x
 
-						rect_color := cur_node.avg_color
-						grey := greyscale(cur_node.avg_color)
+						rect_color := get_node_color(trace, cur_node)
+						grey := greyscale(rect_color)
 						if ui_state.multiselecting {
 							if found_rid != -1 {
 								range := trace.stats.selected_ranges[found_rid]   
