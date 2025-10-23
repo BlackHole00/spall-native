@@ -14,6 +14,14 @@ import "core:strings"
 import "core:sys/posix"
 import "core:sys/darwin"
 
+Segment_Range :: struct {
+	file_off: u64,
+	file_size: u64,
+	mem_off: u64,
+	mem_size: u64,
+	name: string,
+}
+
 Mach_Recv_Msg :: struct {
 	header:    darwin.mach_msg_header_t,
 	body:      darwin.mach_msg_body_t,
@@ -41,6 +49,8 @@ Sample_State :: struct {
 	threads: map[u64]Sample_Thread,
 	program_path: string,
 	dylibs_checked: bool,
+
+	should_sample: bool,
 }
 
 map_child_mem :: proc(my_task: darwin.task_t, child_task: darwin.task_t, addr: u64, $T: typeid) -> (val: ^T, ok: bool) {
@@ -124,6 +134,9 @@ sample_arm64_thread :: proc(my_task: darwin.task_t, child_task: darwin.task_t, t
     append(callstack, state.pc)
 	sample_thread.max_depth = max(sample_thread.max_depth, cur_depth)
 
+	fmt.printf("PC: 0x%x\n", state.pc)
+
+/*
 	//fmt.printf("starting sample\n")
 	fp := state.fp
 	sp := state.sp
@@ -158,6 +171,7 @@ sample_arm64_thread :: proc(my_task: darwin.task_t, child_task: darwin.task_t, t
 
 		fp = new_fp
 	}
+*/
 
     return true
 }
@@ -205,6 +219,18 @@ sample_x86_thread :: proc(my_task: darwin.task_t, child_task: darwin.task_t, thr
 	return true
 }
 
+adjust_offset :: proc(file_offset: u64, mappings: []Segment_Range) -> (u64, bool) {
+	for mapping in mappings {
+		mapping_end := mapping.file_off + mapping.file_size
+		if val_in_range(file_offset, mapping.file_off, mapping_end) {
+			adj_offset := mapping.mem_off + (file_offset - mapping.file_off)
+			return adj_offset, true
+		}
+	}
+
+	return 0, false
+}
+
 process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.task_t, sample_state: ^Sample_State) -> bool {
 	if sample_state.dylibs_checked {
 		return true
@@ -233,7 +259,8 @@ process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 		if !ok2 { continue dylib_loop }
 		defer unmap_child_mem(my_task, file_path_addr, file_path_bytes)
 
-		file_path := string(cstring(raw_data((file_path_bytes^)[:])))
+		file_path_cstr := cstring(raw_data((file_path_bytes^)[:]))
+		file_path := string(file_path_cstr)
 
 		header, ok3 := map_child_mem(my_task, child_task, info_entry.image_load_addr, Mach_Header_64)
 		if !ok3 { continue dylib_loop }
@@ -241,11 +268,21 @@ process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 		cmd_end_addr := cmd_start_addr + u64(header.cmd_size)
 		defer unmap_child_mem(my_task, info_entry.image_load_addr, header)
 
+		is_executable := (header.file_type == MACH_FILETYPE_EXEC)
+		in_shared_cache := (header.flags & MACH_DYLIB_IN_CACHE) != 0
+
 		uuid_cmd := Mach_UUID_Command{}
 		symtab_cmd := Mach_Symtab_Command{}
 		header_and_cmds, ok4 := map_child_slice(my_task, child_task, info_entry.image_load_addr, cmd_end_addr - cmd_start_addr)
 		if !ok4 { continue dylib_loop }
 		defer unmap_child_slice(my_task, info_entry.image_load_addr, header_and_cmds)
+
+		symtab_header := Mach_Symtab_Command{}
+
+		segment_mappings := make([dynamic]Segment_Range)
+		defer delete(segment_mappings)
+
+		text_segment_idx := min(int)
 
 		j := size_of(Mach_Header_64)
 		for j < len(header_and_cmds) {
@@ -255,6 +292,30 @@ process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 				continue dylib_loop
 			}
 
+			if cmd.type == MACH_CMD_SEGMENT_64 {
+				seg_hdr, ok2 := slice_to_type(current_buffer, Mach_Segment_64_Command)
+				if !ok2 {
+					continue dylib_loop
+				}
+
+				mem_skew : u64 = 0
+				if in_shared_cache {
+					mem_skew = image_infos.shared_cache_slide
+				}
+
+				seg_name := strings.string_from_null_terminated_ptr(raw_data(seg_hdr.name[:]), 16)
+				append(&segment_mappings, Segment_Range{
+					file_off  = seg_hdr.file_offset,
+					file_size = seg_hdr.file_size,
+					mem_off   = seg_hdr.address + mem_skew,
+					mem_size  = seg_hdr.mem_size,
+					name      = strings.clone(seg_name),
+				})
+
+				if seg_name == "__TEXT" {
+					text_segment_idx = len(segment_mappings) - 1
+				}
+			}
 			if cmd.type == MACH_CMD_UUID {
 				uuid_cmd, ok = slice_to_type(current_buffer, Mach_UUID_Command)
 				if !ok {
@@ -262,32 +323,84 @@ process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 				}
 			}
 
+			if cmd.type == MACH_CMD_SYMTAB {
+				symtab_header, ok = slice_to_type(current_buffer, Mach_Symtab_Command)
+				if !ok {
+					continue dylib_loop
+				}
+			}
+
 			j += int(cmd.size)
-			fmt.printf("path: %v | cmd: %v\n", file_path, cmd)
+		}
+		if text_segment_idx == min(int) {
+			continue dylib_loop
 		}
 
-    /*
-		exec_buffer, ok5 := os.read_entire_file_from_filename(file_path)
+/*
+		fmt.printf("%s\n", file_path)
+		for s in segment_mappings {
+			fmt.printf("%s || 0x%08x -> 0x%08x | 0x%08x -> 0x%08x\n",
+				s.name, s.file_off, s.file_off + s.file_size, s.mem_off, s.mem_off + s.mem_size,
+			)
+		}
+*/
+
+		symbol_table_size := u64(symtab_header.symbol_count) * size_of(Mach_Symbol_Entry_64)
+		sym_table_offset, ok5 := adjust_offset(u64(symtab_header.symbol_table_offset), segment_mappings[:])
 		if !ok5 {
-			continue dylib_loop
-		}
-		defer delete(exec_buffer)
-
-		append(&trace.func_buckets, Func_Bucket{
-			source_path = strings.clone(file_path),
-			base_address = info_entry.image_load_addr,
-			functions = make([dynamic]Function),
-			line_info = make([dynamic]Line_Info),
-		})
-		bucket := &trace.func_buckets[len(trace.func_buckets)-1]
-
-		if !load_macho_symbols(trace, exec_buffer, bucket) {
+			fmt.printf("failed sym skew\n")
 			continue dylib_loop
 		}
 
-		debug_path := guess_debug_path(file_path)
-		debug_buffer, ok6 := os.read_entire_file_from_filename(debug_path)
+		string_table_size := u64(symtab_header.string_table_size)
+		string_table_offset, ok6 := adjust_offset(u64(symtab_header.string_table_offset), segment_mappings[:])
 		if !ok6 {
+			fmt.printf("failed string skew\n")
+			continue dylib_loop
+		}
+
+		text_seg := segment_mappings[text_segment_idx]
+		fmt.printf("%s || 0x%08x -> 0x%08x | 0x%08x -> 0x%08x\n",
+			text_seg.name, text_seg.file_off, text_seg.file_off + text_seg.file_size, text_seg.mem_off, text_seg.mem_off + text_seg.mem_size,
+		)
+		if is_executable {
+			info_entry.image_load_addr -= 0x100000000
+		}
+
+		load_skew := info_entry.image_load_addr
+		if in_shared_cache {
+			load_skew = 0
+		}
+		symbol_table_addr := load_skew + sym_table_offset
+		string_table_addr := load_skew + string_table_offset
+
+		symbol_table_bytes, ok7 := map_child_slice(my_task, child_task, symbol_table_addr, symbol_table_size)
+		if !ok7 {
+			fmt.printf("failed sym lookup\n")
+			continue dylib_loop
+		}
+		defer unmap_child_slice(my_task, symbol_table_addr, symbol_table_bytes)
+
+		string_table, ok8 := map_child_slice(my_task, child_task, string_table_addr, string_table_size)
+		if !ok8 {
+			fmt.printf("failed string lookup\n")
+			continue dylib_loop
+		}
+		defer unmap_child_slice(my_task, string_table_addr, string_table)
+
+		symbol_table := slice.reinterpret([]Mach_Symbol_Entry_64, symbol_table_bytes)
+
+		text_skew := -image_infos.shared_cache_slide
+		bucket := new_func_bucket(&trace.func_buckets, strings.clone(file_path), 0)
+		if !load_macho_symbols(trace, bucket, symbol_table, string_table, text_skew, tmp_buffer) {
+			continue dylib_loop
+		}
+		bucket.base_address = text_seg.mem_off
+
+/*
+		debug_path := guess_debug_path(file_path)
+		debug_buffer, ok10 := os.read_entire_file_from_filename(debug_path)
+		if !ok10 {
 			continue dylib_loop
 		}
 		defer delete(debug_buffer)
@@ -295,9 +408,22 @@ process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 		if !load_macho_debug(trace, debug_buffer, bucket) {
 			continue dylib_loop
 		}
-
-    */
+*/
 	}
+
+	fmt.printf("processing dylibs\n")
+	for &bucket in trace.func_buckets {
+		//slice.sort_by(bucket.functions[:], func_order)
+		build_scopes(trace, &bucket)
+
+		fmt.printf("=== start bucket %s ===\n", bucket.source_path)
+		for func in bucket.functions {
+			fmt.printf("0x%08x -> 0x%08x | %s\n", func.low_pc, func.high_pc, in_getstr(&trace.string_block, func.name))
+		}
+		fmt.printf("=== end bucket %s ===\n", bucket.source_path)
+		fmt.printf("0x%08x -> 0x%08x\n", bucket.scopes.low_pc, bucket.scopes.high_pc)
+	}
+	fmt.printf("done processing dylibs\n")
 
 	dyld_path_addr := u64(uintptr(rawptr(image_infos.dyld_path)))
 	dyld_path_bytes := map_child_mem(my_task, child_task, dyld_path_addr, [512]u8) or_return
@@ -306,12 +432,16 @@ process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 	return true
 }
 
-sample_task :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.task_t, sample_state: ^Sample_State) -> bool {
+sample_task :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.task_t, child_pid: posix.pid_t, sample_state: ^Sample_State) -> bool {
 	ts := time.read_cycle_counter()
 	if darwin.task_suspend(child_task) != .Success {
 		return false
 	}
-	defer darwin.task_resume(child_task)
+	//defer darwin.task_resume(child_task)
+
+	if !sample_state.should_sample {
+		return true
+	}
 
 	thread_list: darwin.thread_list_t
 	thread_count: u32
@@ -455,19 +585,21 @@ sample_child :: proc(trace: ^Trace, program_name: string, path: string, args: []
 	sample_state := Sample_State{}
 	sample_state.threads = make(map[u64]Sample_Thread)
 	sample_state.program_path = real_path
+	sample_state.should_sample = true
 
 	init_trace_allocs(trace, program_name)
 
 	for !trace.requested_stop {
-		if !sample_task(trace, sample_setup.my_task, child_task, &sample_state) {
+		if !sample_task(trace, sample_setup.my_task, child_task, child_pid, &sample_state) {
 			break
 		}
-		//if true { return }
+		if true { sample_state.should_sample = false }
 		time.sleep(1 * time.Millisecond)
 	}
 	trailing_ts := time.read_cycle_counter()
 
 	if trace.requested_stop {
+		posix.kill(child_pid, .SIGTERM)
 		darwin.task_terminate(child_task)
 
 	// Wait for the program to fully finish

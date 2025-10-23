@@ -571,7 +571,7 @@ load_executable :: proc(trace: ^Trace, file_name: string, base_addr: u64) -> boo
 		}
 	} else if magic_chunk == MACH_MAGIC_64 {
 
-		ok := load_macho_symbols(trace, exec_buffer, bucket)
+		ok := load_macho(trace, exec_buffer, bucket)
 		if !ok {
 			post_error(trace, "Failed to parse Mach-O!")
 			return false
@@ -988,6 +988,10 @@ add_func :: proc(bucket: ^Func_Bucket, sym_idx: u64, in_low_pc: u64, in_high_pc:
 	non_zero_append(&bucket.functions, func)
 }
 
+fast_func_order :: proc(a, b: Function) -> bool {
+	return a.low_pc < b.low_pc
+}
+
 func_order :: proc(a, b: Function) -> bool {
 	if a.low_pc < b.low_pc {
 		return true
@@ -1036,7 +1040,7 @@ print_scope_tree :: proc(trace: ^Trace, bucket: ^Func_Bucket, s: ^Scope, depth: 
 }
 
 build_scopes :: proc(trace: ^Trace, bucket: ^Func_Bucket) {
-	fmt.printf("Building scopes!\n")
+	//fmt.printf("Building scopes for %s\n", bucket.source_path)
 	if len(bucket.functions) == 0 {
 		return
 	}
@@ -1063,6 +1067,5 @@ build_scopes :: proc(trace: ^Trace, bucket: ^Func_Bucket) {
 		}
 	}
 
-	fmt.printf("scopes built\n")
 	//print_scope_tree(trace, bucket, &bucket.scopes)
 }

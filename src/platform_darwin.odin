@@ -60,4 +60,4 @@ demangle_symbol :: proc(name: string, tmp_buffer: []u8) -> (string, bool) {
 	return string(ret_str), true
 }
 
-supports_sampling :: proc() -> (ok: bool) { return false }
+supports_sampling :: proc() -> (ok: bool) { return true }
