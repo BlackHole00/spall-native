@@ -312,6 +312,8 @@ Scope :: struct {
 Func_Bucket :: struct {
 	source_path: string,
 	base_address: u64,
+	uuid: [16]u8,
+
 	functions: [dynamic]Function,
 	line_info: [dynamic]Line_Info,
 	scopes: Scope,

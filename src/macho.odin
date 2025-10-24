@@ -21,6 +21,7 @@ MACH_CMD_SEGMENT_64  :: 0x19
 MACH_CMD_UUID        :: 0x1B
 MACH_FILETYPE_EXEC   :: 2
 MACH_FILETYPE_DYLIB  :: 6
+MACH_FILETYPE_DYLD   :: 7
 MACH_FILETYPE_DSYM   :: 10
 MACH_DYLIB_IN_CACHE  :: 0x80000000
 Mach_Header_64 :: struct #packed {
@@ -121,25 +122,7 @@ guess_debug_path :: proc(file_path: string) -> string {
 	return strings.to_string(b)
 }
 
-load_macho_symbols :: proc(trace: ^Trace, bucket: ^Func_Bucket, symbol_table: []Mach_Symbol_Entry_64, string_table: []u8, text_segment_offset: u64, scratch_buffer: []u8) -> bool {
-	for symbol in symbol_table {
-		symbol_name := string(cstring(raw_data(string_table[symbol.string_table_idx:])))
-
-		if symbol_name == "" || symbol.value == 0 {
-			continue
-		}
-
-		demangled_name, ok := demangle_symbol(symbol_name, scratch_buffer)
-		if !ok {
-			return false
-		}
-
-		sym_idx := in_get(&trace.intern, &trace.string_block, demangled_name)
-		sym_addr := bucket.base_address + symbol.value - text_segment_offset
-		bucket.scopes.low_pc = min(bucket.scopes.low_pc, sym_addr)
-		non_zero_append(&bucket.functions, Function{name = sym_idx, low_pc = sym_addr, high_pc = sym_addr})
-	}
-
+patch_symbol_ends :: proc(trace: ^Trace, bucket: ^Func_Bucket) {
 	slice.sort_by(bucket.functions[:], fast_func_order)
 
 	for &function, idx in bucket.functions {
@@ -155,7 +138,32 @@ load_macho_symbols :: proc(trace: ^Trace, bucket: ^Func_Bucket, symbol_table: []
 		str := in_getstr(&trace.string_block, prev_func.name)
 		//fmt.printf("0x%08x -> 0x%08x | %s\n", prev_func.low_pc, prev_func.high_pc, str)
 	}
+}
 
+load_macho_symbols :: proc(trace: ^Trace, bucket: ^Func_Bucket, symbol_table: []Mach_Symbol_Entry_64, string_table: []u8, text_segment_offset: u64, text_seg_start: u64, text_seg_end: u64, scratch_buffer: []u8) -> bool {
+	for symbol in symbol_table {
+		symbol_name := string(cstring(raw_data(string_table[symbol.string_table_idx:])))
+
+		if symbol_name == "" || symbol.value == 0 {
+			continue
+		}
+
+		sym_addr := bucket.base_address + symbol.value - text_segment_offset
+		if !val_in_range(sym_addr, text_seg_start, text_seg_end) {
+			continue
+		}
+
+		bucket.scopes.low_pc = min(bucket.scopes.low_pc, sym_addr)
+		demangled_name, ok := demangle_symbol(symbol_name, scratch_buffer)
+		if !ok {
+			return false
+		}
+
+		sym_idx := in_get(&trace.intern, &trace.string_block, demangled_name)
+		non_zero_append(&bucket.functions, Function{name = sym_idx, low_pc = sym_addr, high_pc = sym_addr})
+	}
+
+	patch_symbol_ends(trace, bucket)
 	return true
 }
 
@@ -242,7 +250,7 @@ load_macho :: proc(trace: ^Trace, _exec_buffer: []u8, bucket: ^Func_Bucket) -> b
 	tmp_buffer := make([]u8, 1024*1024, context.temp_allocator)
 	symbol_table := transmute([]Mach_Symbol_Entry_64)exec_buffer[symtab_header.symbol_table_offset:][:symbol_table_size]
 	string_table := exec_buffer[symtab_header.string_table_offset:][:symtab_header.string_table_size]
-	return load_macho_symbols(trace, bucket, symbol_table, string_table, text_segment_offset, tmp_buffer)
+	return true //load_macho_symbols(trace, bucket, symbol_table, string_table, text_segment_offset, tmp_buffer)
 }
 
 load_macho_debug :: proc(trace: ^Trace, exec_buffer: []u8, bucket: ^Func_Bucket) -> bool {

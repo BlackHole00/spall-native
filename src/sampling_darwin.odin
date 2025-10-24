@@ -19,7 +19,6 @@ Segment_Range :: struct {
 	file_size: u64,
 	mem_off: u64,
 	mem_size: u64,
-	name: string,
 }
 
 Mach_Recv_Msg :: struct {
@@ -120,7 +119,7 @@ unmap_child_slice :: proc(my_task: darwin.task_t, orig_addr: u64, mem: []u8) {
 	darwin.mach_vm_deallocate(my_task, mem_ptr, full_size)
 }
 
-sample_arm64_thread :: proc(my_task: darwin.task_t, child_task: darwin.task_t, thread: darwin.thread_act_t, ts: u64, sample_thread: ^Sample_Thread) -> (ok: bool) {
+sample_arm64_thread :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.task_t, thread: darwin.thread_act_t, ts: u64, sample_thread: ^Sample_Thread) -> (ok: bool) {
 	state: darwin.arm_thread_state64_t
 	state_count: u32 = darwin.ARM_THREAD_STATE64_COUNT
 	if darwin.thread_get_state(thread, darwin.ARM_THREAD_STATE64, darwin.thread_state_t(&state), &state_count) != .Success {
@@ -133,8 +132,6 @@ sample_arm64_thread :: proc(my_task: darwin.task_t, child_task: darwin.task_t, t
 	callstack := &sample_thread.samples[len(sample_thread.samples)-1].callstack
     append(callstack, state.pc)
 	sample_thread.max_depth = max(sample_thread.max_depth, cur_depth)
-
-	fmt.printf("PC: 0x%x\n", state.pc)
 
 /*
 	//fmt.printf("starting sample\n")
@@ -176,7 +173,7 @@ sample_arm64_thread :: proc(my_task: darwin.task_t, child_task: darwin.task_t, t
     return true
 }
 
-sample_x86_thread :: proc(my_task: darwin.task_t, child_task: darwin.task_t, thread: darwin.thread_act_t, ts: u64, sample_thread: ^Sample_Thread) -> (ok: bool) {
+sample_x86_thread :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.task_t, thread: darwin.thread_act_t, ts: u64, sample_thread: ^Sample_Thread) -> (ok: bool) {
 	state: darwin.x86_thread_state64_t
 	state_count: u32 = darwin.X86_THREAD_STATE64_COUNT
 	if darwin.thread_get_state(thread, darwin.X86_THREAD_STATE64, darwin.thread_state_t(&state), &state_count) != .Success {
@@ -219,16 +216,169 @@ sample_x86_thread :: proc(my_task: darwin.task_t, child_task: darwin.task_t, thr
 	return true
 }
 
-adjust_offset :: proc(file_offset: u64, mappings: []Segment_Range) -> (u64, bool) {
-	for mapping in mappings {
-		mapping_end := mapping.file_off + mapping.file_size
-		if val_in_range(file_offset, mapping.file_off, mapping_end) {
-			adj_offset := mapping.mem_off + (file_offset - mapping.file_off)
-			return adj_offset, true
-		}
+adjust_offset :: proc(file_offset: u64, text_seg: ^Segment_Range) -> (u64, bool) {
+	if val_in_range(file_offset, text_seg.file_off, text_seg.file_off + text_seg.file_size) {
+		adj_offset := text_seg.mem_off + (file_offset - text_seg.file_off)
+		return adj_offset, true
 	}
 
 	return 0, false
+}
+
+process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.task_t, file_path: string, load_addr: u64, shared_cache_slide: u64, tmp_buffer: []u8) -> bool {
+	header := map_child_mem(my_task, child_task, load_addr, Mach_Header_64) or_return
+
+	cmd_start_addr := load_addr + size_of(header^)
+	cmd_end_addr := cmd_start_addr + u64(header.cmd_size)
+	defer unmap_child_mem(my_task, load_addr, header)
+
+	is_dyld := (header.file_type == MACH_FILETYPE_DYLD)
+	is_executable := (header.file_type == MACH_FILETYPE_EXEC)
+	is_dylib := (header.file_type == MACH_FILETYPE_DYLIB)
+	in_shared_cache := (header.flags & MACH_DYLIB_IN_CACHE) != 0
+
+	uuid_cmd := Mach_UUID_Command{}
+	symtab_cmd := Mach_Symtab_Command{}
+	header_and_cmds := map_child_slice(my_task, child_task, load_addr, cmd_end_addr - cmd_start_addr) or_return
+	defer unmap_child_slice(my_task, load_addr, header_and_cmds)
+
+	symtab_header := Mach_Symtab_Command{}
+
+	text_seg := Segment_Range{}
+	linkedit_seg := Segment_Range{}
+	uuid := [16]u8{}
+
+	j := size_of(Mach_Header_64)
+	for j < len(header_and_cmds) {
+		current_buffer := header_and_cmds[j:]
+		cmd := slice_to_type(current_buffer, Mach_Load_Command) or_return
+		if cmd.size == 0 {
+			return false
+		}
+
+		if cmd.type == MACH_CMD_SEGMENT_64 {
+			seg_hdr := slice_to_type(current_buffer, Mach_Segment_64_Command) or_return
+
+			mem_skew : u64 = 0
+			if in_shared_cache {
+				mem_skew = shared_cache_slide
+			}
+
+			seg := Segment_Range{
+				file_off  = seg_hdr.file_offset,
+				file_size = seg_hdr.file_size,
+				mem_off   = seg_hdr.address + mem_skew,
+				mem_size  = seg_hdr.mem_size,
+			}
+
+			seg_name := strings.string_from_null_terminated_ptr(raw_data(seg_hdr.name[:]), 16)
+			if seg_name == "__TEXT" {
+				text_seg = seg
+			} else if seg_name == "__LINKEDIT" {
+				linkedit_seg = seg
+			}
+
+/*
+			fmt.printf("segment %s\n", seg_name)
+			fmt.printf("0x%016x -> 0x%016x\n", seg.file_off, seg.file_off + seg.file_size)
+			fmt.printf("0x%016x -> 0x%016x\n", seg.mem_off, seg.mem_off + seg.mem_size)
+*/
+		}
+		if cmd.type == MACH_CMD_UUID {
+			uuid_cmd = slice_to_type(current_buffer, Mach_UUID_Command) or_return
+			uuid = uuid_cmd.uuid
+		}
+
+		if cmd.type == MACH_CMD_SYMTAB {
+			symtab_header = slice_to_type(current_buffer, Mach_Symtab_Command) or_return
+/*
+			fmt.printf("symtab @ 0x%016x, count: %d\n", symtab_header.symbol_table_offset, symtab_header.symbol_count)
+			fmt.printf("strtab @ 0x%016x, size: 0x%016x\n", symtab_header.string_table_offset, symtab_header.string_table_size)
+*/
+		}
+
+		j += int(cmd.size)
+	}
+
+	symbol_table_size := u64(symtab_header.symbol_count) * size_of(Mach_Symbol_Entry_64)
+	sym_table_offset := adjust_offset(u64(symtab_header.symbol_table_offset), &linkedit_seg) or_return
+
+	string_table_size := u64(symtab_header.string_table_size)
+	string_table_offset := adjust_offset(u64(symtab_header.string_table_offset), &linkedit_seg) or_return
+
+	load_skew : u64 = 0
+	if !in_shared_cache {
+		load_skew = load_addr - text_seg.mem_off
+	}
+	//fmt.printf("\tload skew: 0x%016x || load addr: 0x%016x || text off: 0x%016x\n", load_skew, load_addr, text_seg.mem_off)
+	symbol_table_addr := load_skew + sym_table_offset
+	string_table_addr := load_skew + string_table_offset
+	//fmt.printf("\tsymbol table addr: 0x%016x || string table addr: 0x%016x\n", symbol_table_addr, string_table_addr)
+
+	symbol_table_bytes, ok := map_child_slice(my_task, child_task, symbol_table_addr, symbol_table_size)
+	if !ok {
+		fmt.printf("invalid symbol table addr 0x%016x for %s\n", symbol_table_addr, file_path)
+		return false
+	}
+	defer unmap_child_slice(my_task, symbol_table_addr, symbol_table_bytes)
+
+	string_table, ok2 := map_child_slice(my_task, child_task, string_table_addr, string_table_size)
+	if !ok2 {
+		fmt.printf("invalid string table addr 0x%016x for %s\n", string_table_addr, file_path)
+		return false
+	}
+	defer unmap_child_slice(my_task, string_table_addr, string_table)
+
+	symbol_table := slice.reinterpret([]Mach_Symbol_Entry_64, symbol_table_bytes)
+	bucket := new_func_bucket(&trace.func_buckets, strings.clone(file_path), text_seg.mem_off)
+
+	for symbol in symbol_table {
+		symbol_name := string(cstring(raw_data(string_table[symbol.string_table_idx:])))
+
+		if symbol_name == "" || symbol.value == 0 {
+			continue
+		}
+
+		text_start := text_seg.mem_off
+		sym_addr := load_skew + symbol.value
+		if in_shared_cache {
+			sym_addr = symbol.value + shared_cache_slide
+		}
+		if !in_shared_cache && !is_executable {
+			text_start = load_addr
+		}
+
+		if !val_in_range(sym_addr, text_start, text_start + text_seg.mem_size) {
+			continue
+		}
+
+		bucket.scopes.low_pc = min(bucket.scopes.low_pc, sym_addr)
+		demangled_name, ok := demangle_symbol(symbol_name, tmp_buffer)
+		if !ok {
+			continue
+		}
+
+		sym_idx := in_get(&trace.intern, &trace.string_block, demangled_name)
+		non_zero_append(&bucket.functions, Function{name = sym_idx, low_pc = sym_addr, high_pc = sym_addr})
+	}
+	patch_symbol_ends(trace, bucket)
+
+	bucket.uuid = uuid
+
+/*
+		debug_path := guess_debug_path(file_path)
+		debug_buffer, ok10 := os.read_entire_file_from_filename(debug_path)
+		if !ok10 {
+			continue dylib_loop
+		}
+		defer delete(debug_buffer)
+
+		if !load_macho_debug(trace, debug_buffer, bucket) {
+			continue dylib_loop
+		}
+*/
+
+	return true
 }
 
 process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.task_t, sample_state: ^Sample_State) -> bool {
@@ -248,6 +398,17 @@ process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 	image_infos := map_child_mem(my_task, child_task, dyld_info.all_image_info_addr, darwin.dyld_all_image_infos) or_return
 	defer unmap_child_mem(my_task, dyld_info.all_image_info_addr, image_infos)
 
+	dyld_file_path_addr := u64(uintptr(rawptr(image_infos.dyld_path)))
+	dyld_file_path_bytes := map_child_mem(my_task, child_task, dyld_file_path_addr, [512]u8) or_return
+	defer unmap_child_mem(my_task, dyld_file_path_addr, dyld_file_path_bytes)
+	dyld_file_path_cstr := cstring(raw_data((dyld_file_path_bytes^)[:]))
+	dyld_file_path := string(dyld_file_path_cstr)
+
+	if !process_object(trace, my_task, child_task, dyld_file_path, image_infos.dyld_image_load_addr, image_infos.shared_cache_slide, tmp_buffer) {
+		fmt.printf("Failed to process dyld!\n")
+		return false
+	}
+
 	dylib_loop: for i : u64 = 0; i < u64(image_infos.info_array_count); i += 1 {
 		info_array_entry_addr := u64(uintptr(image_infos.info_array)) + (i * size_of(darwin.dyld_image_info))
 		info_entry, ok := map_child_mem(my_task, child_task, info_array_entry_addr, darwin.dyld_image_info)
@@ -262,168 +423,41 @@ process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 		file_path_cstr := cstring(raw_data((file_path_bytes^)[:]))
 		file_path := string(file_path_cstr)
 
-		header, ok3 := map_child_mem(my_task, child_task, info_entry.image_load_addr, Mach_Header_64)
-		if !ok3 { continue dylib_loop }
-		cmd_start_addr := info_entry.image_load_addr + size_of(header^)
-		cmd_end_addr := cmd_start_addr + u64(header.cmd_size)
-		defer unmap_child_mem(my_task, info_entry.image_load_addr, header)
-
-		is_executable := (header.file_type == MACH_FILETYPE_EXEC)
-		in_shared_cache := (header.flags & MACH_DYLIB_IN_CACHE) != 0
-
-		uuid_cmd := Mach_UUID_Command{}
-		symtab_cmd := Mach_Symtab_Command{}
-		header_and_cmds, ok4 := map_child_slice(my_task, child_task, info_entry.image_load_addr, cmd_end_addr - cmd_start_addr)
-		if !ok4 { continue dylib_loop }
-		defer unmap_child_slice(my_task, info_entry.image_load_addr, header_and_cmds)
-
-		symtab_header := Mach_Symtab_Command{}
-
-		segment_mappings := make([dynamic]Segment_Range)
-		defer delete(segment_mappings)
-
-		text_segment_idx := min(int)
-
-		j := size_of(Mach_Header_64)
-		for j < len(header_and_cmds) {
-			current_buffer := header_and_cmds[j:]
-			cmd, ok := slice_to_type(current_buffer, Mach_Load_Command)
-			if cmd.size == 0 || !ok {
-				continue dylib_loop
-			}
-
-			if cmd.type == MACH_CMD_SEGMENT_64 {
-				seg_hdr, ok2 := slice_to_type(current_buffer, Mach_Segment_64_Command)
-				if !ok2 {
-					continue dylib_loop
-				}
-
-				mem_skew : u64 = 0
-				if in_shared_cache {
-					mem_skew = image_infos.shared_cache_slide
-				}
-
-				seg_name := strings.string_from_null_terminated_ptr(raw_data(seg_hdr.name[:]), 16)
-				append(&segment_mappings, Segment_Range{
-					file_off  = seg_hdr.file_offset,
-					file_size = seg_hdr.file_size,
-					mem_off   = seg_hdr.address + mem_skew,
-					mem_size  = seg_hdr.mem_size,
-					name      = strings.clone(seg_name),
-				})
-
-				if seg_name == "__TEXT" {
-					text_segment_idx = len(segment_mappings) - 1
-				}
-			}
-			if cmd.type == MACH_CMD_UUID {
-				uuid_cmd, ok = slice_to_type(current_buffer, Mach_UUID_Command)
-				if !ok {
-					continue dylib_loop
-				}
-			}
-
-			if cmd.type == MACH_CMD_SYMTAB {
-				symtab_header, ok = slice_to_type(current_buffer, Mach_Symtab_Command)
-				if !ok {
-					continue dylib_loop
-				}
-			}
-
-			j += int(cmd.size)
-		}
-		if text_segment_idx == min(int) {
+		if !process_object(trace, my_task, child_task, file_path, info_entry.image_load_addr, image_infos.shared_cache_slide, tmp_buffer) {
+			fmt.printf("failed to process %s\n", file_path)
 			continue dylib_loop
 		}
-
-/*
-		fmt.printf("%s\n", file_path)
-		for s in segment_mappings {
-			fmt.printf("%s || 0x%08x -> 0x%08x | 0x%08x -> 0x%08x\n",
-				s.name, s.file_off, s.file_off + s.file_size, s.mem_off, s.mem_off + s.mem_size,
-			)
-		}
-*/
-
-		symbol_table_size := u64(symtab_header.symbol_count) * size_of(Mach_Symbol_Entry_64)
-		sym_table_offset, ok5 := adjust_offset(u64(symtab_header.symbol_table_offset), segment_mappings[:])
-		if !ok5 {
-			fmt.printf("failed sym skew\n")
-			continue dylib_loop
-		}
-
-		string_table_size := u64(symtab_header.string_table_size)
-		string_table_offset, ok6 := adjust_offset(u64(symtab_header.string_table_offset), segment_mappings[:])
-		if !ok6 {
-			fmt.printf("failed string skew\n")
-			continue dylib_loop
-		}
-
-		text_seg := segment_mappings[text_segment_idx]
-		fmt.printf("%s || 0x%08x -> 0x%08x | 0x%08x -> 0x%08x\n",
-			text_seg.name, text_seg.file_off, text_seg.file_off + text_seg.file_size, text_seg.mem_off, text_seg.mem_off + text_seg.mem_size,
-		)
-		if is_executable {
-			info_entry.image_load_addr -= 0x100000000
-		}
-
-		load_skew := info_entry.image_load_addr
-		if in_shared_cache {
-			load_skew = 0
-		}
-		symbol_table_addr := load_skew + sym_table_offset
-		string_table_addr := load_skew + string_table_offset
-
-		symbol_table_bytes, ok7 := map_child_slice(my_task, child_task, symbol_table_addr, symbol_table_size)
-		if !ok7 {
-			fmt.printf("failed sym lookup\n")
-			continue dylib_loop
-		}
-		defer unmap_child_slice(my_task, symbol_table_addr, symbol_table_bytes)
-
-		string_table, ok8 := map_child_slice(my_task, child_task, string_table_addr, string_table_size)
-		if !ok8 {
-			fmt.printf("failed string lookup\n")
-			continue dylib_loop
-		}
-		defer unmap_child_slice(my_task, string_table_addr, string_table)
-
-		symbol_table := slice.reinterpret([]Mach_Symbol_Entry_64, symbol_table_bytes)
-
-		text_skew := -image_infos.shared_cache_slide
-		bucket := new_func_bucket(&trace.func_buckets, strings.clone(file_path), 0)
-		if !load_macho_symbols(trace, bucket, symbol_table, string_table, text_skew, tmp_buffer) {
-			continue dylib_loop
-		}
-		bucket.base_address = text_seg.mem_off
-
-/*
-		debug_path := guess_debug_path(file_path)
-		debug_buffer, ok10 := os.read_entire_file_from_filename(debug_path)
-		if !ok10 {
-			continue dylib_loop
-		}
-		defer delete(debug_buffer)
-
-		if !load_macho_debug(trace, debug_buffer, bucket) {
-			continue dylib_loop
-		}
-*/
 	}
 
-	fmt.printf("processing dylibs\n")
-	for &bucket in trace.func_buckets {
-		//slice.sort_by(bucket.functions[:], func_order)
-		build_scopes(trace, &bucket)
+	fmt.printf("processing %v objects\n", len(trace.func_buckets))
 
+	bucket_order :: proc(a, b: Func_Bucket) -> bool {
+		return a.base_address < b.base_address
+	}
+
+	slice.sort_by(trace.func_buckets[:], bucket_order)
+	for &bucket, idx in trace.func_buckets {
+		build_scopes(trace, &bucket)
+		if idx % 10 == 0 {
+			fmt.printf("finished %v out of %v\n", idx, len(trace.func_buckets))
+		}
+
+/*
 		fmt.printf("=== start bucket %s ===\n", bucket.source_path)
 		for func in bucket.functions {
 			fmt.printf("0x%08x -> 0x%08x | %s\n", func.low_pc, func.high_pc, in_getstr(&trace.string_block, func.name))
 		}
 		fmt.printf("=== end bucket %s ===\n", bucket.source_path)
 		fmt.printf("0x%08x -> 0x%08x\n", bucket.scopes.low_pc, bucket.scopes.high_pc)
+*/
 	}
-	fmt.printf("done processing dylibs\n")
+	fmt.printf("done processing objects\n")
+
+/*
+	for bucket, idx in trace.func_buckets {
+		fmt.printf("[%d] %s 0x%016x %s\n", idx, fmt_macho_debug_id(bucket.uuid), bucket.base_address, bucket.source_path)
+	}
+*/
 
 	dyld_path_addr := u64(uintptr(rawptr(image_infos.dyld_path)))
 	dyld_path_bytes := map_child_mem(my_task, child_task, dyld_path_addr, [512]u8) or_return
@@ -437,11 +471,9 @@ sample_task :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.ta
 	if darwin.task_suspend(child_task) != .Success {
 		return false
 	}
-	//defer darwin.task_resume(child_task)
+	defer darwin.task_resume(child_task)
 
-	if !sample_state.should_sample {
-		return true
-	}
+	process_dylibs(trace, my_task, child_task, sample_state)
 
 	thread_list: darwin.thread_list_t
 	thread_count: u32
@@ -449,8 +481,7 @@ sample_task :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.ta
 		return false
 	}
 
-	process_dylibs(trace, my_task, child_task, sample_state)
-
+	//fmt.printf("0x%08x | sampling %v threads\n", ts, thread_count)
 	for i : u32 = 0; i < thread_count; i += 1 {
 		thread := thread_list[i]
 
@@ -466,10 +497,11 @@ sample_task :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.ta
 			sample_thread, _ = &sample_state.threads[id_info.thread_id]
 		}
 
+		//fmt.printf("%d | %016d ", i, id_info.thread_id)
 		if ODIN_ARCH == .amd64 {
-			sample_x86_thread(my_task, child_task, thread, ts, sample_thread)
+			sample_x86_thread(trace, my_task, child_task, thread, ts, sample_thread)
         } else if ODIN_ARCH == .arm64 {
-            sample_arm64_thread(my_task, child_task, thread, ts, sample_thread)
+            sample_arm64_thread(trace, my_task, child_task, thread, ts, sample_thread)
 		} else {
 			fmt.printf("don't support yet!\n")
 			continue
@@ -593,7 +625,6 @@ sample_child :: proc(trace: ^Trace, program_name: string, path: string, args: []
 		if !sample_task(trace, sample_setup.my_task, child_task, child_pid, &sample_state) {
 			break
 		}
-		if true { sample_state.should_sample = false }
 		time.sleep(1 * time.Millisecond)
 	}
 	trailing_ts := time.read_cycle_counter()
