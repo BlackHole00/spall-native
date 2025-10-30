@@ -19,6 +19,9 @@ Segment_Range :: struct {
 	file_size: u64,
 	mem_off: u64,
 	mem_size: u64,
+
+	mem_start: u64,
+	mem_end: u64,
 }
 
 Mach_Recv_Msg :: struct {
@@ -229,7 +232,7 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 	header := map_child_mem(my_task, child_task, load_addr, Mach_Header_64) or_return
 
 	cmd_start_addr := load_addr + size_of(header^)
-	cmd_end_addr := cmd_start_addr + u64(header.cmd_size)
+	header_and_cmds_size := size_of(header^) + u64(header.cmd_size)
 	defer unmap_child_mem(my_task, load_addr, header)
 
 	is_dyld := (header.file_type == MACH_FILETYPE_DYLD)
@@ -239,15 +242,21 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 
 	uuid_cmd := Mach_UUID_Command{}
 	symtab_cmd := Mach_Symtab_Command{}
-	header_and_cmds := map_child_slice(my_task, child_task, load_addr, cmd_end_addr - cmd_start_addr) or_return
+	header_and_cmds := map_child_slice(my_task, child_task, load_addr, header_and_cmds_size) or_return
 	defer unmap_child_slice(my_task, load_addr, header_and_cmds)
 
 	symtab_header := Mach_Symtab_Command{}
 
 	text_seg := Segment_Range{}
 	linkedit_seg := Segment_Range{}
+	unwind_seg := Segment_Range{}
+	has_unwind_info := false
 	uuid := [16]u8{}
 
+	func_starts_hdr := Mach_Linkedit_Data_Command{}
+	has_func_starts := false
+
+	cmd_count := 0
 	j := size_of(Mach_Header_64)
 	for j < len(header_and_cmds) {
 		current_buffer := header_and_cmds[j:]
@@ -256,7 +265,10 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 			return false
 		}
 
-		if cmd.type == MACH_CMD_SEGMENT_64 {
+		//fmt.printf("%v | got command [type %v (0x%08x), size: %v]\n", cmd_count, cmd.type, u32(cmd.type), cmd.size)
+		cmd_count += 1
+		#partial switch cmd.type {
+		case .Segment_64:
 			seg_hdr := slice_to_type(current_buffer, Mach_Segment_64_Command) or_return
 
 			mem_skew : u64 = 0
@@ -270,9 +282,38 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 				mem_off   = seg_hdr.address + mem_skew,
 				mem_size  = seg_hdr.mem_size,
 			}
+			seg.mem_start = seg.mem_off
+			seg.mem_end = seg.mem_off + seg.mem_size
 
 			seg_name := strings.string_from_null_terminated_ptr(raw_data(seg_hdr.name[:]), 16)
 			if seg_name == "__TEXT" {
+				seg_min := max(u64)
+				seg_max := min(u64)
+
+				sub_idx := j + size_of(Mach_Segment_64_Command)
+				end_idx := j + int(cmd.size)
+				for sub_idx < end_idx {
+					section := slice_to_type(header_and_cmds[sub_idx:], Mach_Section) or_return
+					section_name := strings.string_from_null_terminated_ptr(raw_data(section.name[:]), 16)
+
+					seg_min = min(seg_min, section.address)
+					seg_max = max(seg_max, section.address + section.size)
+					if section_name == "__unwind_info" {
+						unwind_seg = Segment_Range{
+							file_off  = u64(section.offset),
+							file_size = section.size,
+							mem_off   = u64(section.address) + mem_skew,
+							mem_size  = section.size,
+						}
+						has_unwind_info = true
+					}
+
+					sub_idx += size_of(Mach_Section)
+				}
+
+				seg.mem_start = seg_min + mem_skew
+				seg.mem_end = seg_max + mem_skew
+
 				text_seg = seg
 			} else if seg_name == "__LINKEDIT" {
 				linkedit_seg = seg
@@ -283,38 +324,32 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 			fmt.printf("0x%016x -> 0x%016x\n", seg.file_off, seg.file_off + seg.file_size)
 			fmt.printf("0x%016x -> 0x%016x\n", seg.mem_off, seg.mem_off + seg.mem_size)
 */
-		}
-		if cmd.type == MACH_CMD_UUID {
+		case .UUID:
 			uuid_cmd = slice_to_type(current_buffer, Mach_UUID_Command) or_return
 			uuid = uuid_cmd.uuid
-		}
 
-		if cmd.type == MACH_CMD_SYMTAB {
+		case .Symtab:
 			symtab_header = slice_to_type(current_buffer, Mach_Symtab_Command) or_return
 /*
 			fmt.printf("symtab @ 0x%016x, count: %d\n", symtab_header.symbol_table_offset, symtab_header.symbol_count)
 			fmt.printf("strtab @ 0x%016x, size: 0x%016x\n", symtab_header.string_table_offset, symtab_header.string_table_size)
 */
+		case .Function_Starts:
+			func_starts_hdr = slice_to_type(current_buffer, Mach_Linkedit_Data_Command) or_return
+			has_func_starts = true
 		}
-
+		
 		j += int(cmd.size)
 	}
-
-	symbol_table_size := u64(symtab_header.symbol_count) * size_of(Mach_Symbol_Entry_64)
-	sym_table_offset := adjust_offset(u64(symtab_header.symbol_table_offset), &linkedit_seg) or_return
-
-	string_table_size := u64(symtab_header.string_table_size)
-	string_table_offset := adjust_offset(u64(symtab_header.string_table_offset), &linkedit_seg) or_return
 
 	load_skew : u64 = 0
 	if !in_shared_cache {
 		load_skew = load_addr - text_seg.mem_off
 	}
-	//fmt.printf("\tload skew: 0x%016x || load addr: 0x%016x || text off: 0x%016x\n", load_skew, load_addr, text_seg.mem_off)
-	symbol_table_addr := load_skew + sym_table_offset
-	string_table_addr := load_skew + string_table_offset
-	//fmt.printf("\tsymbol table addr: 0x%016x || string table addr: 0x%016x\n", symbol_table_addr, string_table_addr)
 
+	symbol_table_size := u64(symtab_header.symbol_count) * size_of(Mach_Symbol_Entry_64)
+	sym_table_offset  := adjust_offset(u64(symtab_header.symbol_table_offset), &linkedit_seg) or_return
+	symbol_table_addr := load_skew + sym_table_offset
 	symbol_table_bytes, ok := map_child_slice(my_task, child_task, symbol_table_addr, symbol_table_size)
 	if !ok {
 		fmt.printf("invalid symbol table addr 0x%016x for %s\n", symbol_table_addr, file_path)
@@ -322,6 +357,9 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 	}
 	defer unmap_child_slice(my_task, symbol_table_addr, symbol_table_bytes)
 
+	string_table_size := u64(symtab_header.string_table_size)
+	string_table_offset := adjust_offset(u64(symtab_header.string_table_offset), &linkedit_seg) or_return
+	string_table_addr := load_skew + string_table_offset
 	string_table, ok2 := map_child_slice(my_task, child_task, string_table_addr, string_table_size)
 	if !ok2 {
 		fmt.printf("invalid string table addr 0x%016x for %s\n", string_table_addr, file_path)
@@ -329,8 +367,121 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 	}
 	defer unmap_child_slice(my_task, string_table_addr, string_table)
 
+	if has_unwind_info {
+		unwind_info_addr := load_skew + unwind_seg.mem_off
+		unwind_info_bytes, ok4 := map_child_slice(my_task, child_task, unwind_info_addr, unwind_seg.mem_size)
+		if !ok4 {
+			fmt.printf("invalid unwind info addr 0x%016x for %s\n", unwind_info_addr, file_path)
+			return false
+		}
+		defer unmap_child_slice(my_task, unwind_info_addr, unwind_info_bytes)
+
+		unwind_hdr := slice_to_type(unwind_info_bytes, Mach_Unwind_Info_Header) or_return
+
+		pages_end_offset := unwind_hdr.pages_offset + (unwind_hdr.pages_len * size_of(Mach_Page_Entry))
+		global_opcodes := slice.reinterpret([]u32, unwind_info_bytes[unwind_hdr.global_opcodes_offset:][:(unwind_hdr.global_opcodes_len * size_of(u32))])
+		pages          := slice.reinterpret([]Mach_Page_Entry, unwind_info_bytes[unwind_hdr.pages_offset:][:(unwind_hdr.pages_len) * size_of(Mach_Page_Entry)])
+
+		for page in pages {
+			if page.subpage_offset == 0 {
+				continue
+			}
+
+			subpage_type := slice_to_type(unwind_info_bytes[page.subpage_offset:], Mach_Subpage_Kind) or_return
+
+			#partial switch subpage_type {
+			case .Compressed:
+				subpage := slice_to_type(unwind_info_bytes[page.subpage_offset:], Mach_Compressed_Subpage) or_return
+				local_opcodes := slice.reinterpret([]u32, unwind_info_bytes[page.subpage_offset + u32(subpage.local_opcodes_offset):][:(subpage.local_opcodes_len * size_of(u32))])
+
+				entries := slice.reinterpret([]u32, unwind_info_bytes[page.subpage_offset + u32(subpage.entries_offset):][:subpage.entries_len * size_of(u32)])
+				for entry in entries {
+					op_idx := entry >> 24
+					addr := entry << 8 >> 8
+
+					op := u32(0)
+					if op_idx < u32(len(global_opcodes)) {
+						op = global_opcodes[op_idx]
+					} else {
+						local_idx := op_idx - u32(len(global_opcodes))
+						op = local_opcodes[local_idx]
+					}
+
+					is_start := (op & (1 << 31)) != 0
+					has_lsda := (op & (1 << 30)) != 0
+					personality_idx := (op >> 28) & 0b11
+					opcode := (op >> 24) & 0b1111
+
+					unwind_op := Mach_ARM_Unwind_Op(opcode)
+/*
+					fmt.printf("C | addr: 0x%08x, is start: %v, has_lsda: %v, personality idx: %v, op: 0x%08x, opcode: %d, op kind: %v\n",
+						page.first_addr + addr, is_start, has_lsda, personality_idx, op, opcode, unwind_op,
+					)
+*/
+				}
+			case .Regular:
+				subpage := slice_to_type(unwind_info_bytes[page.subpage_offset:], Mach_Regular_Subpage) or_return
+
+				entries := slice.reinterpret([]Mach_Regular_Entry, unwind_info_bytes[page.subpage_offset + u32(subpage.entries_offset):][:subpage.entries_len * size_of(Mach_Regular_Entry)])
+				for entry in entries {
+					op := entry.opcode
+					is_start := (op & (1 << 31)) != 0
+					has_lsda := (op & (1 << 30)) != 0
+					personality_idx := (op >> 28) & 0b11
+					opcode := (op >> 24) & 0b1111
+
+					unwind_op := Mach_ARM_Unwind_Op(opcode)
+//					fmt.printf("R | addr: 0x%08x, is start: %v, has_lsda: %v, personality idx: %v, opcode_kind: %v, op: %v\n", entry.inst_addr, is_start, has_lsda, personality_idx, opcode, unwind_op)
+				}
+			case:
+				fmt.printf("unhandled subpage type %v (%v)\n", subpage_type, u32(subpage_type))
+				return false
+			}
+		}
+	}
+
+/*
+	// Ingest Function Starts... This is supposed to be better than
+	// guessing with symbol addresses. Who knows?
+
+	if has_func_starts {
+		func_starts_size := u64(func_starts_hdr.file_size)
+		func_starts_offset := adjust_offset(u64(func_starts_hdr.file_off), &linkedit_seg) or_return
+		func_starts_addr  := load_skew + func_starts_offset
+
+		func_starts_bytes, ok3 := map_child_slice(my_task, child_task, func_starts_addr, func_starts_size)
+		if !ok3 {
+			fmt.printf("invalid func starts addr 0x%016x for %s\n", func_starts_addr, file_path)
+			return false
+		}
+		defer unmap_child_slice(my_task, func_starts_addr, func_starts_bytes)
+
+		func_addrs := make([dynamic]u64)
+		prev_addr : u64 = 0
+
+		rdr := stream_init(func_starts_bytes)
+		for rdr.idx < len(func_starts_bytes) {
+			addr_dt := stream_uleb(&rdr) or_return
+			if addr_dt == 0 {
+				break
+			}
+
+			addr := prev_addr + addr_dt
+			fmt.printf("dt: %v, addr: 0x%08x\n", addr_dt, addr)
+			prev_addr = addr
+		}
+	}
+*/
+
 	symbol_table := slice.reinterpret([]Mach_Symbol_Entry_64, symbol_table_bytes)
 	bucket := new_func_bucket(&trace.func_buckets, strings.clone(file_path), text_seg.mem_off)
+
+	text_start := text_seg.mem_start
+	text_end := text_seg.mem_end
+	if !in_shared_cache {
+		text_start = load_addr + (text_seg.mem_start - text_seg.mem_off)
+		text_end   = load_addr + (text_seg.mem_end   - text_seg.mem_off)
+	}
 
 	for symbol in symbol_table {
 		symbol_name := string(cstring(raw_data(string_table[symbol.string_table_idx:])))
@@ -339,16 +490,12 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 			continue
 		}
 
-		text_start := text_seg.mem_off
 		sym_addr := load_skew + symbol.value
 		if in_shared_cache {
 			sym_addr = symbol.value + shared_cache_slide
 		}
-		if !in_shared_cache && !is_executable {
-			text_start = load_addr
-		}
 
-		if !val_in_range(sym_addr, text_start, text_start + text_seg.mem_size) {
+		if !val_in_range(sym_addr, text_start, text_end) {
 			continue
 		}
 
@@ -361,7 +508,7 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 		sym_idx := in_get(&trace.intern, &trace.string_block, demangled_name)
 		non_zero_append(&bucket.functions, Function{name = sym_idx, low_pc = sym_addr, high_pc = sym_addr})
 	}
-	patch_symbol_ends(trace, bucket)
+	patch_symbol_ends(trace, bucket, text_end)
 
 	bucket.uuid = uuid
 
@@ -425,7 +572,8 @@ process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 
 		if !process_object(trace, my_task, child_task, file_path, info_entry.image_load_addr, image_infos.shared_cache_slide, tmp_buffer) {
 			fmt.printf("failed to process %s\n", file_path)
-			continue dylib_loop
+			//continue dylib_loop
+			return false
 		}
 	}
 

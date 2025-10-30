@@ -16,9 +16,31 @@ MACH_CPU_TYPE_I386   :: 7
 MACH_CPU_TYPE_X86_64 :: MACH_CPU_TYPE_I386 | MACH_CPU_ABI_64
 MACH_CPU_TYPE_ARM    :: 12
 MACH_CPU_TYPE_ARM64  :: MACH_CPU_TYPE_ARM | MACH_CPU_ABI_64
-MACH_CMD_SYMTAB      :: 0x2
-MACH_CMD_SEGMENT_64  :: 0x19
-MACH_CMD_UUID        :: 0x1B
+
+Mach_Cmd :: enum u32 {
+	Symtab              = 0x2,
+	DySymtab            = 0xB,
+	Load_Dylib          = 0xC,
+	ID_Dylib            = 0xD,
+	Load_Dylinker       = 0xE,
+	Sub_Framework       = 0x12,
+	Sub_Client          = 0x14,
+	Segment_64          = 0x19,
+	UUID                = 0x1B,
+	Code_Signature      = 0x1D,
+	Function_Starts     = 0x26,
+	Data_In_Code        = 0x29,
+	Build_Version       = 0x32,
+	Source_Version      = 0x2A,
+	Load_Weak_Dylib     = 0x80000018,
+	ReExport_Dylib      = 0x8000001f,
+	Load_Upward_Dylib   = 0x80000023,
+	Main                = 0x80000028,
+	DYLD_Info_Only      = 0x80000022,
+	DYLD_Exports_Trie   = 0x80000033,
+	DYLD_Chained_Fixups = 0x80000034,
+}
+
 MACH_FILETYPE_EXEC   :: 2
 MACH_FILETYPE_DYLIB  :: 6
 MACH_FILETYPE_DYLD   :: 7
@@ -48,12 +70,12 @@ Mach_Fat_Arch_Header :: struct #packed {
 }
 
 Mach_Load_Command :: struct #packed {
-	type: u32,
+	type: Mach_Cmd,
 	size: u32,
 }
 
 Mach_Segment_64_Command :: struct #packed {
-	type:                u32,
+	type:                Mach_Cmd,
 	size:                u32,
 	name:             [16]u8,
 	address:             u64,
@@ -82,7 +104,7 @@ Mach_Section :: struct #packed {
 }
 
 Mach_Symtab_Command :: struct #packed {
-	type:                u32,
+	type:                Mach_Cmd,
 	size:                u32,
 	symbol_table_offset: u32,
 	symbol_count:        u32,
@@ -91,9 +113,16 @@ Mach_Symtab_Command :: struct #packed {
 }
 
 Mach_UUID_Command :: struct #packed {
-	type:    u32,
+	type:    Mach_Cmd,
 	size:    u32,
 	uuid: [16]u8,
+}
+
+Mach_Linkedit_Data_Command :: struct #packed {
+	type:      Mach_Cmd,
+	size:      u32,
+	file_off:  u32,
+	file_size: u32,
 }
 
 Mach_Symbol_Entry_64 :: struct #packed {
@@ -102,6 +131,67 @@ Mach_Symbol_Entry_64 :: struct #packed {
 	section_count: u8,
 	description: u16,
 	value: u64,
+}
+
+Mach_Unwind_Info_Header :: struct #packed {
+	version:               u32,
+	global_opcodes_offset: u32,
+	global_opcodes_len:    u32,
+	personalities_offset:  u32,
+	personalities_len:     u32,
+	pages_offset:          u32,
+	pages_len:             u32,
+}
+
+Mach_Page_Entry :: struct #packed {
+	first_addr: u32,
+	subpage_offset: u32,
+	lsda_index_offset: u32,
+}
+
+Mach_Subpage_Kind :: enum u32 {
+	Regular = 2,
+	Compressed = 3,
+}
+
+Mach_Regular_Subpage :: struct #packed {
+	kind: Mach_Subpage_Kind,
+	entries_offset: u16,
+	entries_len: u16,
+}
+
+Mach_Compressed_Subpage :: struct #packed {
+	kind: Mach_Subpage_Kind,
+	entries_offset: u16,
+	entries_len: u16,
+
+	local_opcodes_offset: u16,
+	local_opcodes_len: u16,
+}
+
+Mach_Regular_Entry :: struct #packed {
+	inst_addr: u32,
+	opcode: u32,
+}
+
+Mach_LSDA_Entry :: struct #packed {
+	inst_addr: u32,
+	lsda_addr: u32,
+}
+
+Mach_x86_Unwind_Op :: enum {
+	None = 0,
+	Framed = 1,
+	StackIndirect = 2,
+	StackImmediate = 3,
+	DWARF = 4,
+}
+
+Mach_ARM_Unwind_Op :: enum {
+	None = 0,
+	Frameless = 2,
+	DWARF = 3,
+	Framed = 4,
 }
 
 fmt_macho_debug_id :: proc(uuid: [16]u8) -> string {
@@ -122,7 +212,7 @@ guess_debug_path :: proc(file_path: string) -> string {
 	return strings.to_string(b)
 }
 
-patch_symbol_ends :: proc(trace: ^Trace, bucket: ^Func_Bucket) {
+patch_symbol_ends :: proc(trace: ^Trace, bucket: ^Func_Bucket, text_seg_end: u64) {
 	slice.sort_by(bucket.functions[:], fast_func_order)
 
 	for &function, idx in bucket.functions {
@@ -137,6 +227,13 @@ patch_symbol_ends :: proc(trace: ^Trace, bucket: ^Func_Bucket) {
 
 		str := in_getstr(&trace.string_block, prev_func.name)
 		//fmt.printf("0x%08x -> 0x%08x | %s\n", prev_func.low_pc, prev_func.high_pc, str)
+	}
+
+	if len(bucket.functions) > 0 {
+		last_func := &bucket.functions[len(bucket.functions)-1]
+		high_addr := text_seg_end
+		last_func.high_pc = high_addr
+		bucket.scopes.high_pc = max(bucket.scopes.high_pc, high_addr)
 	}
 }
 
@@ -163,7 +260,7 @@ load_macho_symbols :: proc(trace: ^Trace, bucket: ^Func_Bucket, symbol_table: []
 		non_zero_append(&bucket.functions, Function{name = sym_idx, low_pc = sym_addr, high_pc = sym_addr})
 	}
 
-	patch_symbol_ends(trace, bucket)
+	patch_symbol_ends(trace, bucket, text_seg_end)
 	return true
 }
 
@@ -219,7 +316,7 @@ load_macho :: proc(trace: ^Trace, _exec_buffer: []u8, bucket: ^Func_Bucket) -> b
 			return false
 		}
 
-		if cmd.type == MACH_CMD_SEGMENT_64 {
+		if cmd.type == .Segment_64 {
 			segment_header := slice_to_type(current_buffer, Mach_Segment_64_Command) or_return
 			segment_name := strings.string_from_null_terminated_ptr(raw_data(segment_header.name[:]), 16)
 			if segment_name == "__TEXT" {
@@ -227,7 +324,7 @@ load_macho :: proc(trace: ^Trace, _exec_buffer: []u8, bucket: ^Func_Bucket) -> b
 			}
 		}
 
-		if cmd.type == MACH_CMD_SYMTAB {
+		if cmd.type == .Symtab {
 			symtab_header = slice_to_type(current_buffer, Mach_Symtab_Command) or_return
 			break
 		}
@@ -274,7 +371,7 @@ load_macho_debug :: proc(trace: ^Trace, exec_buffer: []u8, bucket: ^Func_Bucket)
 			return false
 		}
 
-		if cmd.type == MACH_CMD_SEGMENT_64 {
+		if cmd.type == .Segment_64 {
 			segment_header := slice_to_type(exec_buffer[read_idx:], Mach_Segment_64_Command) or_return
 			segment_name := strings.string_from_null_terminated_ptr(raw_data(segment_header.name[:]), 16)
 			if segment_name == "__TEXT" {
