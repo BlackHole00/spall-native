@@ -24,6 +24,14 @@ Segment_Range :: struct {
 	mem_end: u64,
 }
 
+ARM_Compact_Unwind_Op :: struct {
+	type: Mach_ARM_Unwind_Op_Type,
+	addr: u32,
+	len: u32,
+
+	stack_size: u64,
+}
+
 Mach_Recv_Msg :: struct {
 	header:    darwin.mach_msg_header_t,
 	body:      darwin.mach_msg_body_t,
@@ -122,19 +130,118 @@ unmap_child_slice :: proc(my_task: darwin.task_t, orig_addr: u64, mem: []u8) {
 	darwin.mach_vm_deallocate(my_task, mem_ptr, full_size)
 }
 
-sample_arm64_thread :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.task_t, thread: darwin.thread_act_t, ts: u64, sample_thread: ^Sample_Thread) -> (ok: bool) {
+sample_arm64_thread :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.task_t, thread: darwin.thread_act_t, ts: u64, sample_thread: ^Sample_Thread) -> (_ok: bool) {
 	state: darwin.arm_thread_state64_t
 	state_count: u32 = darwin.ARM_THREAD_STATE64_COUNT
 	if darwin.thread_get_state(thread, darwin.ARM_THREAD_STATE64, darwin.thread_state_t(&state), &state_count) != .Success {
 		return
 	}
 
-	cur_depth := 1
+	cur_depth := 0
 
 	append(&sample_thread.samples, Sample{ts = i64(ts), callstack = make([dynamic]u64)})
 	callstack := &sample_thread.samples[len(sample_thread.samples)-1].callstack
-    append(callstack, state.pc)
-	sample_thread.max_depth = max(sample_thread.max_depth, cur_depth)
+
+	sp := state.sp
+	fp := state.fp
+	pc := state.pc
+
+	walk_loop: for {
+		if pc == 0 {
+			//fmt.printf("Finished stack scan?\n")
+			break walk_loop
+		}
+		append(callstack, pc)
+		cur_depth += 1
+		sample_thread.max_depth = max(sample_thread.max_depth, cur_depth)
+
+		cur_bucket, ok := get_bucket(trace, pc)
+		if !ok {
+			//fmt.printf("no bucket found for 0x%08x\n", pc)
+			break walk_loop
+		}
+
+		unwind_op : ^ARM_Compact_Unwind_Op = nil
+		for &entry in cur_bucket.unwind_info {
+			check_addr := cur_bucket.base_address + u64(entry.addr)
+			if pc >= check_addr && pc <= (check_addr + u64(entry.len)) {
+				unwind_op = &entry
+				break
+			} else {
+				//fmt.printf("skipping entry: %#v\n", entry)
+			}
+		}
+
+		if unwind_op == nil {
+//			fmt.printf("no unwind op found?\n")
+			break walk_loop
+		}
+
+		#partial switch unwind_op.type {
+		case .Frameless: 
+			pc_slot_addr := state.lr + 8
+			pc_slot, ok := map_child_mem(my_task, child_task, pc_slot_addr, u64)
+			if !ok {
+				//fmt.printf("failed to map mem: %x\n", pc_slot_addr)
+				break walk_loop
+			}
+			defer unmap_child_mem(my_task, pc_slot_addr, pc_slot)
+
+			pc = (^u64)(uintptr(pc_slot))^
+		case .Framed: 
+			pc_slot_addr := fp + 8
+			pc_slot, ok := map_child_mem(my_task, child_task, pc_slot_addr, u64)
+			if !ok {
+				//fmt.printf("failed to map mem: %x\n", pc_slot_addr)
+				break walk_loop
+			}
+			defer unmap_child_mem(my_task, pc_slot_addr, pc_slot)
+
+			fp_slot_addr := fp
+			fp_slot, ok2 := map_child_mem(my_task, child_task, fp_slot_addr, u64)
+			if !ok2 {
+				//fmt.printf("failed to map mem: %x\n", fp_slot_addr)
+				break walk_loop
+			}
+			defer unmap_child_mem(my_task, fp_slot_addr, fp_slot)
+
+			pc = (^u64)(uintptr(pc_slot))^
+			fp = (^u64)(uintptr(fp_slot))^
+
+		// We don't have a rule, so we're gonna YOLO things.
+		case .None:
+			pc_slot_addr := fp + 8
+			pc_slot, ok := map_child_mem(my_task, child_task, pc_slot_addr, u64)
+			if !ok {
+				//fmt.printf("failed to map mem: %x\n", pc_slot_addr)
+				break walk_loop
+			}
+			defer unmap_child_mem(my_task, pc_slot_addr, pc_slot)
+
+			fp_slot_addr := fp
+			fp_slot, ok2 := map_child_mem(my_task, child_task, fp_slot_addr, u64)
+			if !ok2 {
+				//fmt.printf("failed to map mem: %x\n", fp_slot_addr)
+				break walk_loop
+			}
+			defer unmap_child_mem(my_task, fp_slot_addr, fp_slot)
+
+			pc = (^u64)(uintptr(pc_slot))^
+			fp = (^u64)(uintptr(fp_slot))^
+		case:
+/*
+			func_name_idx, ok := get_function_name(trace, pc)
+			func_name := ""
+			if ok {
+				func_name = in_getstr(&trace.string_block, func_name_idx)
+			}
+			fmt.printf("Unhandled Unwind op %#v for 0x%08x | base address: 0x%08x | %s | %s\n", unwind_op, pc, cur_bucket.base_address, cur_bucket.source_path, func_name)
+*/
+			break walk_loop
+		}
+	}
+
+	return true
 
 /*
 	//fmt.printf("starting sample\n")
@@ -171,9 +278,9 @@ sample_arm64_thread :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: d
 
 		fp = new_fp
 	}
-*/
 
     return true
+*/
 }
 
 sample_x86_thread :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.task_t, thread: darwin.thread_act_t, ts: u64, sample_thread: ^Sample_Thread) -> (ok: bool) {
@@ -257,6 +364,9 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 	has_func_starts := false
 
 	cmd_count := 0
+	sect_count := 0
+	text_sect_idx := 0
+
 	j := size_of(Mach_Header_64)
 	for j < len(header_and_cmds) {
 		current_buffer := header_and_cmds[j:]
@@ -286,34 +396,34 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 			seg.mem_end = seg.mem_off + seg.mem_size
 
 			seg_name := strings.string_from_null_terminated_ptr(raw_data(seg_hdr.name[:]), 16)
-			if seg_name == "__TEXT" {
-				seg_min := max(u64)
-				seg_max := min(u64)
 
-				sub_idx := j + size_of(Mach_Segment_64_Command)
-				end_idx := j + int(cmd.size)
-				for sub_idx < end_idx {
-					section := slice_to_type(header_and_cmds[sub_idx:], Mach_Section) or_return
-					section_name := strings.string_from_null_terminated_ptr(raw_data(section.name[:]), 16)
+			seg_min := max(u64)
+			seg_max := min(u64)
 
-					seg_min = min(seg_min, section.address)
-					seg_max = max(seg_max, section.address + section.size)
-					if section_name == "__unwind_info" {
-						unwind_seg = Segment_Range{
-							file_off  = u64(section.offset),
-							file_size = section.size,
-							mem_off   = u64(section.address) + mem_skew,
-							mem_size  = section.size,
-						}
-						has_unwind_info = true
+			sections := slice.reinterpret([]Mach_Section, header_and_cmds[j + size_of(Mach_Segment_64_Command):][:int(cmd.size)])
+			for &section in sections {
+				sect_count += 1
+
+				seg_min = min(seg_min, section.address)
+				seg_max = max(seg_max, section.address + section.size)
+
+				section_name := strings.string_from_null_terminated_ptr(raw_data(&section.name), 16)
+				if section_name == "__unwind_info" {
+					unwind_seg = Segment_Range{
+						file_off  = u64(section.offset),
+						file_size = section.size,
+						mem_off   = u64(section.address) + mem_skew,
+						mem_size  = section.size,
 					}
-
-					sub_idx += size_of(Mach_Section)
+					has_unwind_info = true
+				} else if section_name == "__text" {
+					text_sect_idx = sect_count
 				}
+			}
+			seg.mem_start = seg_min + mem_skew
+			seg.mem_end = seg_max + mem_skew
 
-				seg.mem_start = seg_min + mem_skew
-				seg.mem_end = seg_max + mem_skew
-
+			if seg_name == "__TEXT" {
 				text_seg = seg
 			} else if seg_name == "__LINKEDIT" {
 				linkedit_seg = seg
@@ -367,6 +477,7 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 	}
 	defer unmap_child_slice(my_task, string_table_addr, string_table)
 
+	unwind_table := make([dynamic]ARM_Compact_Unwind_Op)
 	if has_unwind_info {
 		unwind_info_addr := load_skew + unwind_seg.mem_off
 		unwind_info_bytes, ok4 := map_child_slice(my_task, child_task, unwind_info_addr, unwind_seg.mem_size)
@@ -381,13 +492,17 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 		pages_end_offset := unwind_hdr.pages_offset + (unwind_hdr.pages_len * size_of(Mach_Page_Entry))
 		global_opcodes := slice.reinterpret([]u32, unwind_info_bytes[unwind_hdr.global_opcodes_offset:][:(unwind_hdr.global_opcodes_len * size_of(u32))])
 		pages          := slice.reinterpret([]Mach_Page_Entry, unwind_info_bytes[unwind_hdr.pages_offset:][:(unwind_hdr.pages_len) * size_of(Mach_Page_Entry)])
-
 		for page in pages {
 			if page.subpage_offset == 0 {
+				if len(unwind_table) > 0 {
+					prev_entry := &unwind_table[len(unwind_table)-1]
+					prev_entry.len = u32(u64(page.first_addr) - u64(prev_entry.addr))
+				}
 				continue
 			}
 
 			subpage_type := slice_to_type(unwind_info_bytes[page.subpage_offset:], Mach_Subpage_Kind) or_return
+			//fmt.printf("0x%08x | 0x%08x | %v\n", page.first_addr, page.subpage_offset, subpage_type)
 
 			#partial switch subpage_type {
 			case .Compressed:
@@ -395,7 +510,7 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 				local_opcodes := slice.reinterpret([]u32, unwind_info_bytes[page.subpage_offset + u32(subpage.local_opcodes_offset):][:(subpage.local_opcodes_len * size_of(u32))])
 
 				entries := slice.reinterpret([]u32, unwind_info_bytes[page.subpage_offset + u32(subpage.entries_offset):][:subpage.entries_len * size_of(u32)])
-				for entry in entries {
+				for entry, idx in entries {
 					op_idx := entry >> 24
 					addr := entry << 8 >> 8
 
@@ -412,26 +527,62 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 					personality_idx := (op >> 28) & 0b11
 					opcode := (op >> 24) & 0b1111
 
-					unwind_op := Mach_ARM_Unwind_Op(opcode)
-/*
-					fmt.printf("C | addr: 0x%08x, is start: %v, has_lsda: %v, personality idx: %v, op: 0x%08x, opcode: %d, op kind: %v\n",
-						page.first_addr + addr, is_start, has_lsda, personality_idx, op, opcode, unwind_op,
-					)
-*/
+					unwind_op_type := Mach_ARM_Unwind_Op_Type(opcode)
+
+					cfi_op := ARM_Compact_Unwind_Op{
+						type = unwind_op_type,
+						addr = page.first_addr + addr,
+					}
+
+					if idx > 0 {
+						prev_entry := &unwind_table[len(unwind_table)-1]
+						prev_entry.len = u32(u64(cfi_op.addr) - u64(prev_entry.addr))
+						if file_path == "/Users/cloin/Desktop/renpy-8.4.1-sdk/lib/py3-mac-universal/librenpython.dylib" {
+							//fmt.printf("0x%08x - %v | %v\n", prev_entry.addr, prev_entry.len, prev_entry.type)
+						}
+					}
+
+					#partial switch unwind_op_type {
+					case .Frameless:
+						stack_size := ((op >> 12) & 0xFFF) * 16
+						cfi_op.stack_size = u64(stack_size)
+					}
+
+					append(&unwind_table, cfi_op)
 				}
 			case .Regular:
 				subpage := slice_to_type(unwind_info_bytes[page.subpage_offset:], Mach_Regular_Subpage) or_return
 
 				entries := slice.reinterpret([]Mach_Regular_Entry, unwind_info_bytes[page.subpage_offset + u32(subpage.entries_offset):][:subpage.entries_len * size_of(Mach_Regular_Entry)])
-				for entry in entries {
+				for entry, idx in entries {
+
 					op := entry.opcode
 					is_start := (op & (1 << 31)) != 0
 					has_lsda := (op & (1 << 30)) != 0
 					personality_idx := (op >> 28) & 0b11
 					opcode := (op >> 24) & 0b1111
 
-					unwind_op := Mach_ARM_Unwind_Op(opcode)
-//					fmt.printf("R | addr: 0x%08x, is start: %v, has_lsda: %v, personality idx: %v, opcode_kind: %v, op: %v\n", entry.inst_addr, is_start, has_lsda, personality_idx, opcode, unwind_op)
+					unwind_op_type := Mach_ARM_Unwind_Op_Type(opcode)
+					cfi_op := ARM_Compact_Unwind_Op{
+						type = unwind_op_type,
+						addr = entry.inst_addr,
+					}
+
+					if idx > 0 {
+						prev_entry := &unwind_table[len(unwind_table)-1]
+						prev_entry.len = u32(u64(cfi_op.addr) - u64(prev_entry.addr))
+						if file_path == "/Users/cloin/Desktop/renpy-8.4.1-sdk/lib/py3-mac-universal/librenpython.dylib" {
+							//fmt.printf("0x%08x - %v | %v\n", prev_entry.addr, prev_entry.len, prev_entry.type)
+						}
+					}
+
+					#partial switch unwind_op_type {
+					case .Frameless:
+						stack_size := ((op >> 12) & 0xFFF) * 16
+						cfi_op.stack_size = u64(stack_size)
+					}
+
+					append(&unwind_table, cfi_op)
 				}
 			case:
 				fmt.printf("unhandled subpage type %v (%v)\n", subpage_type, u32(subpage_type))
@@ -440,9 +591,33 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 		}
 	}
 
+	if file_path == "/Users/cloin/Desktop/renpy-8.4.1-sdk/lib/py3-mac-universal/librenpython.dylib" {
 /*
+		fmt.printf("unwind for %s\n", file_path)
+		for unwind in unwind_table {
+			fmt.printf("0x%08x - %v | %v\n", unwind.addr, unwind.len, unwind.type)
+		}
+		return false
+*/
+	}
+
+
 	// Ingest Function Starts... This is supposed to be better than
 	// guessing with symbol addresses. Who knows?
+
+	base_address := text_seg.mem_off
+	if !is_executable && !in_shared_cache {
+		base_address = load_addr
+	}
+	bucket := new_func_bucket(&trace.func_buckets, strings.clone(file_path), base_address)
+	bucket.unwind_info = unwind_table[:]
+
+	text_start := text_seg.mem_start
+	text_end := text_seg.mem_end
+	if !in_shared_cache {
+		text_start = load_addr + (text_seg.mem_start - text_seg.mem_off)
+		text_end   = load_addr + (text_seg.mem_end   - text_seg.mem_off)
+	}
 
 	if has_func_starts {
 		func_starts_size := u64(func_starts_hdr.file_size)
@@ -456,7 +631,6 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 		}
 		defer unmap_child_slice(my_task, func_starts_addr, func_starts_bytes)
 
-		func_addrs := make([dynamic]u64)
 		prev_addr : u64 = 0
 
 		rdr := stream_init(func_starts_bytes)
@@ -466,27 +640,44 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 				break
 			}
 
-			addr := prev_addr + addr_dt
-			fmt.printf("dt: %v, addr: 0x%08x\n", addr_dt, addr)
-			prev_addr = addr
+			cur_addr := prev_addr + addr_dt
+			if prev_addr == 0 {
+				prev_addr = cur_addr
+				continue
+			}
+
+			skew := base_address
+			if is_executable {
+				skew += load_skew
+			}
+
+			func_start_addr := prev_addr + skew
+			func_end_addr   := cur_addr + skew
+			//fmt.printf("start: 0x%08x || 0x%08x || 0x%08x\n", prev_addr, func_start_addr, load_addr)
+
+			bucket.scopes.low_pc = min(bucket.scopes.low_pc, func_start_addr)
+			non_zero_append(&bucket.functions, Function{name = 0, low_pc = func_start_addr, high_pc = func_end_addr})
+			prev_addr = cur_addr
 		}
+
+		skew := base_address
+		if is_executable {
+			skew += load_skew
+		}
+		func_start_addr := prev_addr + skew
+		//fmt.printf("start: 0x%08x || 0x%08x || 0x%08x\n", prev_addr, func_start_addr, load_addr)
+
+		bucket.scopes.low_pc = min(bucket.scopes.low_pc, func_start_addr)
+		bucket.scopes.high_pc = max(bucket.scopes.high_pc, text_end)
+		non_zero_append(&bucket.functions, Function{name = 0, low_pc = func_start_addr, high_pc = text_end})
 	}
-*/
 
 	symbol_table := slice.reinterpret([]Mach_Symbol_Entry_64, symbol_table_bytes)
-	bucket := new_func_bucket(&trace.func_buckets, strings.clone(file_path), text_seg.mem_off)
-
-	text_start := text_seg.mem_start
-	text_end := text_seg.mem_end
-	if !in_shared_cache {
-		text_start = load_addr + (text_seg.mem_start - text_seg.mem_off)
-		text_end   = load_addr + (text_seg.mem_end   - text_seg.mem_off)
-	}
 
 	for symbol in symbol_table {
 		symbol_name := string(cstring(raw_data(string_table[symbol.string_table_idx:])))
 
-		if symbol_name == "" || symbol.value == 0 {
+		if symbol_name == "" || symbol.value == 0 || (symbol.type & 0xE0) != 0 || int(symbol.section_idx) != text_sect_idx {
 			continue
 		}
 
@@ -494,21 +685,32 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 		if in_shared_cache {
 			sym_addr = symbol.value + shared_cache_slide
 		}
+		//fmt.printf("val: 0x%08x\n", symbol.value)
 
 		if !val_in_range(sym_addr, text_start, text_end) {
 			continue
 		}
 
-		bucket.scopes.low_pc = min(bucket.scopes.low_pc, sym_addr)
 		demangled_name, ok := demangle_symbol(symbol_name, tmp_buffer)
 		if !ok {
 			continue
 		}
 
 		sym_idx := in_get(&trace.intern, &trace.string_block, demangled_name)
-		non_zero_append(&bucket.functions, Function{name = sym_idx, low_pc = sym_addr, high_pc = sym_addr})
+
+		func := find_func_by_low_pc(bucket.functions[:], sym_addr)
+		if func != nil {
+			func.name = sym_idx
+		}
 	}
-	patch_symbol_ends(trace, bucket, text_end)
+
+	for &func in bucket.functions {
+		if func.name == 0 {
+			func_name := fmt.tprintf("func_%v", trace.unnamed_count)
+			trace.unnamed_count += 1
+			func.name = in_get(&trace.intern, &trace.string_block, func_name)
+		}
+	}
 
 	bucket.uuid = uuid
 
@@ -585,19 +787,21 @@ process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 
 	slice.sort_by(trace.func_buckets[:], bucket_order)
 	for &bucket, idx in trace.func_buckets {
-		build_scopes(trace, &bucket)
+		if !build_scopes(trace, &bucket) {
+			return false
+		}
 		if idx % 10 == 0 {
 			fmt.printf("finished %v out of %v\n", idx, len(trace.func_buckets))
 		}
 
-/*
-		fmt.printf("=== start bucket %s ===\n", bucket.source_path)
-		for func in bucket.functions {
-			fmt.printf("0x%08x -> 0x%08x | %s\n", func.low_pc, func.high_pc, in_getstr(&trace.string_block, func.name))
-		}
-		fmt.printf("=== end bucket %s ===\n", bucket.source_path)
-		fmt.printf("0x%08x -> 0x%08x\n", bucket.scopes.low_pc, bucket.scopes.high_pc)
-*/
+		/*
+			fmt.printf("=== start bucket %s ===\n", bucket.source_path)
+			for func in bucket.functions {
+				fmt.printf("0x%08x -> 0x%08x | %s\n", func.low_pc, func.high_pc, in_getstr(&trace.string_block, func.name))
+			}
+			fmt.printf("=== end bucket %s ===\n", bucket.source_path)
+			fmt.printf("0x%08x -> 0x%08x\n", bucket.scopes.low_pc, bucket.scopes.high_pc)
+		*/
 	}
 	fmt.printf("done processing objects\n")
 
@@ -614,19 +818,26 @@ process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 	return true
 }
 
-sample_task :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.task_t, child_pid: posix.pid_t, sample_state: ^Sample_State) -> bool {
+sample_task :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.task_t, child_pid: posix.pid_t, sample_state: ^Sample_State) -> (_ok: bool) {
 	ts := time.read_cycle_counter()
 	if darwin.task_suspend(child_task) != .Success {
-		return false
+		return
 	}
-	defer darwin.task_resume(child_task)
 
-	process_dylibs(trace, my_task, child_task, sample_state)
+	defer {
+		if _ok {
+			darwin.task_resume(child_task)
+		}
+	}
+
+	if !process_dylibs(trace, my_task, child_task, sample_state) {
+		return
+	}
 
 	thread_list: darwin.thread_list_t
 	thread_count: u32
 	if darwin.task_threads(child_task, &thread_list, &thread_count) != .Success {
-		return false
+		return
 	}
 
 	//fmt.printf("0x%08x | sampling %v threads\n", ts, thread_count)
@@ -647,9 +858,9 @@ sample_task :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.ta
 
 		//fmt.printf("%d | %016d ", i, id_info.thread_id)
 		if ODIN_ARCH == .amd64 {
-			sample_x86_thread(trace, my_task, child_task, thread, ts, sample_thread)
+			sample_x86_thread(trace, my_task, child_task, thread, ts, sample_thread) or_return
         } else if ODIN_ARCH == .arm64 {
-            sample_arm64_thread(trace, my_task, child_task, thread, ts, sample_thread)
+            sample_arm64_thread(trace, my_task, child_task, thread, ts, sample_thread) or_return
 		} else {
 			fmt.printf("don't support yet!\n")
 			continue
@@ -777,9 +988,27 @@ sample_child :: proc(trace: ^Trace, program_name: string, path: string, args: []
 	}
 	trailing_ts := time.read_cycle_counter()
 
+	// Pause after done
+	{
+		darwin.task_suspend(child_task)
+/*
+		status: i32 = 0
+		posix.waitpid(child_pid, &status, nil)
+
+		for !posix.WIFEXITED(status) && posix.WIFSIGNALED(status) {
+			if posix.waitpid(child_pid, &status, nil) == -1 {
+				fmt.printf("failed to wait on child\n")
+				return
+			}
+		}
+*/
+	}
+
 	if trace.requested_stop {
+/*
 		posix.kill(child_pid, .SIGTERM)
 		darwin.task_terminate(child_task)
+*/
 
 	// Wait for the program to fully finish
 	} else {

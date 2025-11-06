@@ -827,7 +827,7 @@ ev_name :: proc(trace: ^Trace, ev: ^Event) -> string {
 	if !ev.has_addr {
 		return in_getstr(&trace.string_block, ev.id)
 	}
-	name_idx, ok := get_function(trace, ev.id)
+	name_idx, ok := get_function_name(trace, ev.id)
 	if !ok {
 		tmp_buf := make([]byte, 18, context.temp_allocator)
 		return u64_to_hexstr(tmp_buf, ev.id)
@@ -884,19 +884,14 @@ find_next_scope :: proc(scopes: ^[dynamic]Scope, addr: u64) -> (^Scope, bool) {
 	return nil, false
 }
 
-get_function :: proc(trace: ^Trace, addr: u64) -> (u64, bool) {
-	name_idx, ok := lru.get(&trace.func_lookup_cache, addr)
-	if ok {
-		return name_idx, true
-	}
-
+get_function :: proc(trace: ^Trace, addr: u64) -> (^Function, bool) {
 	cur_bucket, ok2 := get_bucket(trace, addr)
 	if !ok2 {
-		return 0, false
+		return nil, false
 	}
 
 	if len(cur_bucket.functions) == 0 {
-		return 0, false
+		return nil, false
 	}
 
 	low_pc := cur_bucket.scopes.low_pc
@@ -904,7 +899,7 @@ get_function :: proc(trace: ^Trace, addr: u64) -> (u64, bool) {
 
 	// make sure address is within function bounds
 	if low_pc > addr || high_pc < addr {
-		return 0, false
+		return nil, false
 	}
 
 	cur_scope := &cur_bucket.scopes
@@ -918,12 +913,21 @@ get_function :: proc(trace: ^Trace, addr: u64) -> (u64, bool) {
 	}
 
 	if cur_scope.func_idx == max(u64) {
-		return 0, false
+		return nil, false
 	}
 
-	name_idx = cur_bucket.functions[cur_scope.func_idx].name
-	lru.set(&trace.func_lookup_cache, addr, name_idx)
-	return name_idx, true
+	return &cur_bucket.functions[cur_scope.func_idx], true
+}
+
+get_function_name :: proc(trace: ^Trace, addr: u64) -> (_name_idx: u64, _ok: bool) {
+	name_idx, ok := lru.get(&trace.func_lookup_cache, addr)
+	if ok {
+		return name_idx, true
+	}
+
+	func := get_function(trace, addr) or_return
+	lru.set(&trace.func_lookup_cache, addr, func.name)
+	return func.name, true
 }
 
 get_line_info :: proc(trace: ^Trace, addr: u64) -> (string, u64, bool) {
@@ -988,6 +992,7 @@ add_func :: proc(bucket: ^Func_Bucket, sym_idx: u64, in_low_pc: u64, in_high_pc:
 	non_zero_append(&bucket.functions, func)
 }
 
+
 fast_func_order :: proc(a, b: Function) -> bool {
 	return a.low_pc < b.low_pc
 }
@@ -1012,6 +1017,36 @@ func_in_scope :: proc(f: Function, s: ^Scope) -> bool {
 
 addr_in_scope :: proc(addr: u64, s: ^Scope) -> bool {
 	return addr >= s.low_pc && addr <= s.high_pc
+}
+
+find_child_scope :: proc(children: []Scope, func: Function) -> ^Scope {
+	if len(children) == 0 {
+		return nil
+	}
+	
+	low := 0
+	max := len(children)
+	high := max - 1
+
+	for low < high {
+		mid := (low + high) / 2
+
+		child := &children[mid]
+		if func_in_scope(func, child) {
+			return child
+		} else if func.high_pc < child.low_pc {
+			low = mid + 1
+		} else { 
+			high = mid - 1
+		}
+	}
+
+	child := &children[low]
+	if func_in_scope(func, child) {
+		return child
+	}
+
+	return nil
 }
 
 scope_name :: proc(trace: ^Trace, bucket: ^Func_Bucket, s: ^Scope) -> string {
@@ -1039,27 +1074,44 @@ print_scope_tree :: proc(trace: ^Trace, bucket: ^Func_Bucket, s: ^Scope, depth: 
 	}
 }
 
-build_scopes :: proc(trace: ^Trace, bucket: ^Func_Bucket) {
+verify_scope_tree :: proc(s: ^Scope) -> bool {
+	scope_frontier : u64 = 0
+	for &child in s.children {
+		if scope_frontier > child.low_pc {
+			fmt.printf("0x%08x > 0x%08x\n", scope_frontier, child.low_pc)
+			return false
+		}
+		scope_frontier = child.low_pc
+
+		if scope_frontier > child.high_pc {
+			fmt.printf("0x%08x > 0x%08x\n", scope_frontier, child.high_pc)
+			return false
+		}
+		scope_frontier = child.high_pc
+
+		if !verify_scope_tree(&child) {
+			return false
+		}
+	}
+
+	return true
+}
+
+build_scopes :: proc(trace: ^Trace, bucket: ^Func_Bucket) -> bool {
 	//fmt.printf("Building scopes for %s\n", bucket.source_path)
 	if len(bucket.functions) == 0 {
-		return
+		return true
 	}
 
 	for func, idx in bucket.functions {
 		cur_scope := &bucket.scopes
 
 		scopes_walk: for func_in_scope(func, cur_scope) {
-			child_scope: ^Scope
-			child_walk: for &child, _ in cur_scope.children {
-				if func_in_scope(func, &child) {
-					child_scope = &child
-					break child_walk
-				}
-			}
+			child_scope := find_child_scope(cur_scope.children[:], func)
 
 			if child_scope == nil {
 				new_scope := Scope{func_idx = u64(idx), low_pc = func.low_pc, high_pc = func.high_pc}
-				append(&cur_scope.children, new_scope)
+				non_zero_append(&cur_scope.children, new_scope)
 				break scopes_walk
 			} else {
 				cur_scope = child_scope
@@ -1067,5 +1119,39 @@ build_scopes :: proc(trace: ^Trace, bucket: ^Func_Bucket) {
 		}
 	}
 
+/*
+	if !verify_scope_tree(&bucket.scopes) {
+		fmt.printf("scope tree failed validation!\n")
+		return false
+	}
+*/
+
 	//print_scope_tree(trace, bucket, &bucket.scopes)
+	return true
+}
+
+find_func_by_low_pc :: proc(funcs: []Function, addr: u64) -> ^Function {
+	if len(funcs) == 0 {
+		return nil
+	}
+	
+	low := 0
+	max := len(funcs)
+	high := max - 1
+
+	for low < high {
+		mid := (low + high) / 2
+
+		func := &funcs[mid]
+		if func.low_pc == addr {
+			return func
+		} else if func.low_pc < addr {
+			low = mid + 1
+		} else { 
+			high = mid - 1
+		}
+	}
+
+	func := &funcs[low]
+	return func
 }

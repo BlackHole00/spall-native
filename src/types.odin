@@ -317,6 +317,8 @@ Func_Bucket :: struct {
 	functions: [dynamic]Function,
 	line_info: [dynamic]Line_Info,
 	scopes: Scope,
+
+	unwind_info: []ARM_Compact_Unwind_Op,
 }
 
 COLOR_CHOICES :: 64
@@ -353,6 +355,8 @@ Trace :: struct {
 	error_storage: [4096]u8,
 
 	func_lookup_cache: lru.Cache(u64, u64),
+
+	unnamed_count: int,
 }
 
 BUCKET_SIZE :: 32

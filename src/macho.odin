@@ -128,7 +128,7 @@ Mach_Linkedit_Data_Command :: struct #packed {
 Mach_Symbol_Entry_64 :: struct #packed {
 	string_table_idx: u32,
 	type: u8,
-	section_count: u8,
+	section_idx: u8,
 	description: u16,
 	value: u64,
 }
@@ -179,7 +179,7 @@ Mach_LSDA_Entry :: struct #packed {
 	lsda_addr: u32,
 }
 
-Mach_x86_Unwind_Op :: enum {
+Mach_x86_Unwind_Op_Type :: enum {
 	None = 0,
 	Framed = 1,
 	StackIndirect = 2,
@@ -187,7 +187,7 @@ Mach_x86_Unwind_Op :: enum {
 	DWARF = 4,
 }
 
-Mach_ARM_Unwind_Op :: enum {
+Mach_ARM_Unwind_Op_Type :: enum {
 	None = 0,
 	Frameless = 2,
 	DWARF = 3,
