@@ -146,7 +146,7 @@ sample_arm64_thread :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: d
 
 	cur_depth := 0
 
-	append(&sample_thread.samples, Sample{ts = i64(ts), callstack = make([dynamic]u64)})
+	non_zero_append(&sample_thread.samples, Sample{ts = i64(ts), callstack = make([dynamic]u64)})
 	callstack := &sample_thread.samples[len(sample_thread.samples)-1].callstack
 
 	sp := state.sp
@@ -158,7 +158,7 @@ sample_arm64_thread :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: d
 			//fmt.printf("Finished stack scan?\n")
 			break walk_loop
 		}
-		append(callstack, pc)
+		non_zero_append(callstack, pc)
 		cur_depth += 1
 		sample_thread.max_depth = max(sample_thread.max_depth, cur_depth)
 
@@ -274,7 +274,7 @@ sample_arm64_thread :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: d
 			return false
 		}
 
-		append(callstack, fp)
+		non_zero_append(callstack, fp)
 		cur_depth += 1
 		sample_thread.max_depth = max(sample_thread.max_depth, cur_depth)
 
@@ -299,9 +299,9 @@ sample_x86_thread :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: dar
 
 	cur_depth := 1
 
-	append(&sample_thread.samples, Sample{ts = i64(ts), callstack = make([dynamic]u64)})
+	non_zero_append(&sample_thread.samples, Sample{ts = i64(ts), callstack = make([dynamic]u64)})
 	callstack := &sample_thread.samples[len(sample_thread.samples)-1].callstack
-	append(callstack, state.rip)
+	non_zero_append(callstack, state.rip)
 	sample_thread.max_depth = max(sample_thread.max_depth, cur_depth)
 
 	sp := state.rsp
@@ -320,7 +320,7 @@ sample_x86_thread :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: dar
 
 		slot := map_child_mem(my_task, child_task, bp, u64) or_return
 
-		append(callstack, bp)
+		non_zero_append(callstack, bp)
 		cur_depth += 1
 		sample_thread.max_depth = max(sample_thread.max_depth, cur_depth)
 
@@ -565,7 +565,7 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 						cfi_op.stack_size = u64(stack_size)
 					}
 
-					append(&unwind_table, cfi_op)
+					non_zero_append(&unwind_table, cfi_op)
 				}
 			case .Regular:
 				subpage := slice_to_type(unwind_info_bytes[page.subpage_offset:], Mach_Regular_Subpage) or_return
@@ -599,7 +599,7 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 						cfi_op.stack_size = u64(stack_size)
 					}
 
-					append(&unwind_table, cfi_op)
+					non_zero_append(&unwind_table, cfi_op)
 				}
 			case:
 				fmt.printf("unhandled subpage type %v (%v)\n", subpage_type, u32(subpage_type))
