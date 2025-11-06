@@ -1098,8 +1098,13 @@ verify_scope_tree :: proc(s: ^Scope) -> bool {
 }
 
 build_scopes :: proc(trace: ^Trace, bucket: ^Func_Bucket) -> bool {
+	if bucket.scopes_built {
+		return true
+	}
+
 	//fmt.printf("Building scopes for %s\n", bucket.source_path)
 	if len(bucket.functions) == 0 {
+		bucket.scopes_built = true
 		return true
 	}
 
@@ -1127,6 +1132,8 @@ build_scopes :: proc(trace: ^Trace, bucket: ^Func_Bucket) -> bool {
 */
 
 	//print_scope_tree(trace, bucket, &bucket.scopes)
+
+	bucket.scopes_built = true
 	return true
 }
 

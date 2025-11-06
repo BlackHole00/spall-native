@@ -55,12 +55,19 @@ Sample_Thread :: struct {
 	max_depth: int,
 }
 
+UUID :: [16]u8
+
 Sample_State :: struct {
 	threads: map[u64]Sample_Thread,
 	program_path: string,
-	dylibs_checked: bool,
 
-	should_sample: bool,
+	my_task: darwin.task_t,
+	child_task: darwin.task_t,
+	child_pid: posix.pid_t,
+
+	processed_dyld: bool,
+	shared_cache_uuid: UUID,
+	dylib_uuid_to_bucket: map[UUID]^Func_Bucket,
 }
 
 map_child_mem :: proc(my_task: darwin.task_t, child_task: darwin.task_t, addr: u64, $T: typeid) -> (val: ^T, ok: bool) {
@@ -335,7 +342,7 @@ adjust_offset :: proc(file_offset: u64, text_seg: ^Segment_Range) -> (u64, bool)
 	return 0, false
 }
 
-process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.task_t, file_path: string, load_addr: u64, shared_cache_slide: u64, tmp_buffer: []u8) -> bool {
+process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.task_t, sample_state: ^Sample_State, file_path: string, load_addr: u64, shared_cache_slide: u64, tmp_buffer: []u8) -> bool {
 	header := map_child_mem(my_task, child_task, load_addr, Mach_Header_64) or_return
 
 	cmd_start_addr := load_addr + size_of(header^)
@@ -346,6 +353,11 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 	is_executable := (header.file_type == MACH_FILETYPE_EXEC)
 	is_dylib := (header.file_type == MACH_FILETYPE_DYLIB)
 	in_shared_cache := (header.flags & MACH_DYLIB_IN_CACHE) != 0
+
+	blank_uuid := UUID{}
+	if in_shared_cache && sample_state.shared_cache_uuid != blank_uuid {
+		return true
+	}
 
 	uuid_cmd := Mach_UUID_Command{}
 	symtab_cmd := Mach_Symtab_Command{}
@@ -450,6 +462,11 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 		}
 		
 		j += int(cmd.size)
+	}
+
+	_, found_uuid := sample_state.dylib_uuid_to_bucket[uuid]
+	if found_uuid {
+		return true
 	}
 
 	load_skew : u64 = 0
@@ -713,6 +730,7 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 	}
 
 	bucket.uuid = uuid
+	sample_state.dylib_uuid_to_bucket[uuid] = bucket
 
 /*
 		debug_path := guess_debug_path(file_path)
@@ -731,10 +749,6 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 }
 
 process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.task_t, sample_state: ^Sample_State) -> bool {
-	if sample_state.dylibs_checked {
-		return true
-	}
-	sample_state.dylibs_checked = true
 
 	dyld_info := darwin.task_dyld_info{}
 	count : u32 = darwin.TASK_DYLD_INFO_COUNT
@@ -742,20 +756,41 @@ process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 		return false
 	}
 
-	tmp_buffer := make([]u8, 1024*1024, context.temp_allocator)
-
 	image_infos := map_child_mem(my_task, child_task, dyld_info.all_image_info_addr, darwin.dyld_all_image_infos) or_return
 	defer unmap_child_mem(my_task, dyld_info.all_image_info_addr, image_infos)
 
-	dyld_file_path_addr := u64(uintptr(rawptr(image_infos.dyld_path)))
-	dyld_file_path_bytes := map_child_mem(my_task, child_task, dyld_file_path_addr, [512]u8) or_return
-	defer unmap_child_mem(my_task, dyld_file_path_addr, dyld_file_path_bytes)
-	dyld_file_path_cstr := cstring(raw_data((dyld_file_path_bytes^)[:]))
-	dyld_file_path := string(dyld_file_path_cstr)
+	tmp_buffer := make([]u8, 1024*1024, context.temp_allocator)
+	if !sample_state.processed_dyld {
+		dyld_file_path_addr := u64(uintptr(rawptr(image_infos.dyld_path)))
+		dyld_file_path_bytes := map_child_mem(my_task, child_task, dyld_file_path_addr, [512]u8) or_return
+		defer unmap_child_mem(my_task, dyld_file_path_addr, dyld_file_path_bytes)
+		dyld_file_path_cstr := cstring(raw_data((dyld_file_path_bytes^)[:]))
+		dyld_file_path := string(dyld_file_path_cstr)
 
-	if !process_object(trace, my_task, child_task, dyld_file_path, image_infos.dyld_image_load_addr, image_infos.shared_cache_slide, tmp_buffer) {
-		fmt.printf("Failed to process dyld!\n")
-		return false
+		if !process_object(trace, my_task, child_task, sample_state, dyld_file_path, image_infos.dyld_image_load_addr, image_infos.shared_cache_slide, tmp_buffer) {
+			fmt.printf("Failed to process dyld!\n")
+			return false
+		}
+		sample_state.processed_dyld = true
+	}
+
+	uuid_array_addr := u64(uintptr(image_infos.uuid_array))
+	uuid_array_bytes := map_child_slice(my_task, child_task, uuid_array_addr, image_infos.uuid_array_count * size_of(darwin.dyld_uuid_info)) or_return
+	defer unmap_child_slice(my_task, uuid_array_addr, uuid_array_bytes)
+
+	uuid_infos := slice.reinterpret([]darwin.dyld_uuid_info, uuid_array_bytes)
+
+	loaded_all_dylibs := true
+	for uuid_info in uuid_infos {
+		_, ok := sample_state.dylib_uuid_to_bucket[uuid_info.image_uuid]
+		if !ok {
+			loaded_all_dylibs = false
+			break
+		}
+	}
+
+	if sample_state.shared_cache_uuid == image_infos.shared_cache_uuid && loaded_all_dylibs {
+		return true
 	}
 
 	dylib_loop: for i : u64 = 0; i < u64(image_infos.info_array_count); i += 1 {
@@ -772,14 +807,11 @@ process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 		file_path_cstr := cstring(raw_data((file_path_bytes^)[:]))
 		file_path := string(file_path_cstr)
 
-		if !process_object(trace, my_task, child_task, file_path, info_entry.image_load_addr, image_infos.shared_cache_slide, tmp_buffer) {
+		if !process_object(trace, my_task, child_task, sample_state, file_path, info_entry.image_load_addr, image_infos.shared_cache_slide, tmp_buffer) {
 			fmt.printf("failed to process %s\n", file_path)
-			//continue dylib_loop
 			return false
 		}
 	}
-
-	fmt.printf("processing %v objects\n", len(trace.func_buckets))
 
 	bucket_order :: proc(a, b: Func_Bucket) -> bool {
 		return a.base_address < b.base_address
@@ -790,31 +822,9 @@ process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 		if !build_scopes(trace, &bucket) {
 			return false
 		}
-		if idx % 10 == 0 {
-			fmt.printf("finished %v out of %v\n", idx, len(trace.func_buckets))
-		}
-
-		/*
-			fmt.printf("=== start bucket %s ===\n", bucket.source_path)
-			for func in bucket.functions {
-				fmt.printf("0x%08x -> 0x%08x | %s\n", func.low_pc, func.high_pc, in_getstr(&trace.string_block, func.name))
-			}
-			fmt.printf("=== end bucket %s ===\n", bucket.source_path)
-			fmt.printf("0x%08x -> 0x%08x\n", bucket.scopes.low_pc, bucket.scopes.high_pc)
-		*/
 	}
-	fmt.printf("done processing objects\n")
 
-/*
-	for bucket, idx in trace.func_buckets {
-		fmt.printf("[%d] %s 0x%016x %s\n", idx, fmt_macho_debug_id(bucket.uuid), bucket.base_address, bucket.source_path)
-	}
-*/
-
-	dyld_path_addr := u64(uintptr(rawptr(image_infos.dyld_path)))
-	dyld_path_bytes := map_child_mem(my_task, child_task, dyld_path_addr, [512]u8) or_return
-	defer unmap_child_mem(my_task, dyld_path_addr, dyld_path_bytes)
-
+	sample_state.shared_cache_uuid = image_infos.shared_cache_uuid
 	return true
 }
 
@@ -976,7 +986,7 @@ sample_child :: proc(trace: ^Trace, program_name: string, path: string, args: []
 	sample_state := Sample_State{}
 	sample_state.threads = make(map[u64]Sample_Thread)
 	sample_state.program_path = real_path
-	sample_state.should_sample = true
+	sample_state.dylib_uuid_to_bucket = make(map[UUID]^Func_Bucket)
 
 	init_trace_allocs(trace, program_name)
 

@@ -318,6 +318,8 @@ Func_Bucket :: struct {
 	line_info: [dynamic]Line_Info,
 	scopes: Scope,
 
+	scopes_built: bool,
+
 	unwind_info: []ARM_Compact_Unwind_Op,
 }
 
