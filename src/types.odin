@@ -320,7 +320,8 @@ Func_Bucket :: struct {
 
 	scopes_built: bool,
 
-	unwind_info: []ARM_Compact_Unwind_Op,
+	darwin_unwind_info: []ARM_Compact_Unwind_Op,
+	dwarf_unwind_info:  DWARF_Unwind_Info,
 }
 
 COLOR_CHOICES :: 64

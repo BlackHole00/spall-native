@@ -2585,6 +2585,7 @@ draw_sample_running :: proc(gfx: ^GFX_Context, trace: ^Trace, ui_state: ^UIState
 		stop_sample_rect := Rect{(ui_state.width / 2) - (sample_button_width / 2), line_y - (button_height / 2), sample_button_width, p_height + (edge_pad / 2)}
 		if button(gfx, stop_sample_rect, sample_button_text, "", .DefaultFont, menu_rect.x, menu_rect.w) {
 			trace.requested_stop = true
+			fmt.printf("requested stop!\n")
 		}
 	} else {
 		stop_text := "Stopping Sampling..."

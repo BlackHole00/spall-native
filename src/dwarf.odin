@@ -18,6 +18,8 @@ Sections :: struct {
 	ranges:      []u8,
 	rnglists:    []u8,
 	unwind_info: []u8,
+	debug_frame: []u8,
+	eh_frame:    []u8,
 }
 
 Dw_Form :: enum {
@@ -319,6 +321,100 @@ Dw_Tag :: enum {
 	GNU_template_parameter_parameter = 0x4106,
 	GNU_template_parameter_pack      = 0x4107,
 	GNU_formal_parameter_pack        = 0x4108,
+}
+
+DWARF_Eh_Encoding :: enum u8 {
+	absptr   = 0x0,
+	uleb128  = 0x1,
+	udata2   = 0x2,
+	udata4   = 0x3,
+	udata8   = 0x4,
+	signed   = 0x8,
+	sleb128  = 0x9,
+
+	sdata2   = 0xa,
+	sdata4   = 0xb,
+	sdata8   = 0xc,
+
+	omit     = 0xff,
+}
+
+DWARF_Eh_Modifier :: enum u8 {
+	pcrel    = 0x10,
+	textrel  = 0x20,
+	datarel  = 0x30,
+	funcrel  = 0x40,
+	aligned  = 0x50,
+	indirect = 0x80,
+}
+
+DWARF_CFA_hi :: enum {
+	nop         = 0x0,
+	advance_loc = 0x1,
+	offset      = 0x2,
+	restore     = 0x3,
+}
+
+DWARF_CFA :: enum {
+	nop                = 0x0,
+	set_loc            = 0x1,
+	advance_loc1       = 0x2,
+	advance_loc2       = 0x3,
+	advance_loc4       = 0x4,
+	offset_extended    = 0x5,
+	restore_extended   = 0x6,
+	undefined          = 0x7,
+	same_value         = 0x8,
+	register           = 0x9,
+	remember_state     = 0xa,
+	restore_state      = 0xb,
+	def_cfa            = 0xc,
+	def_cfa_register   = 0xd,
+	def_cfa_offset     = 0xe,
+	def_cfa_expression = 0xf,
+	expression         = 0x10,
+	offset_extended_sf = 0x11,
+	def_cfa_sf         = 0x12,
+	def_cfa_offset_sf  = 0x13,
+	val_offset         = 0x14,
+	val_offset_sf      = 0x15,
+	val_expression     = 0x16,
+	lo_user            = 0x1c,
+	hi_user            = 0x3f,
+}
+
+DWARF_Unwind_Entry :: struct {
+	entry_offset: u64,
+
+	cfa_reg_idx: i8,
+	cfa_reg_off: i64,
+
+	fp_reg_idx: i8,
+	fp_reg_off: i64,
+}
+
+DWARF_CIE :: struct {
+	code_align: u64,
+	data_align: i64,
+
+	ret_addr_reg: u8,
+	addr_encoding: u8,
+
+	cfa_ops: []u8,
+}
+
+DWARF_FDE :: struct {
+	cie_offset: u64,
+
+	start_addr: u64,
+	end_addr:   u64,
+
+	ops:       []DWARF_Unwind_Entry,
+}
+
+DWARF_Unwind_Info :: struct {
+	offset_to_cie: map[u64]DWARF_CIE,
+	offset_to_fde: map[u64]DWARF_FDE,
 }
 
 DWARF32_V5_Line_Header :: struct #packed {
@@ -1136,6 +1232,314 @@ cleanup_cu_files_list :: proc(cu_files_list: ^[dynamic]CU_Files_Unit) {
 		delete(cu.file_table)
 		delete(cu.line_table.lines)
 	}
+}
+
+pull_fde_encoded_val :: proc(rdr: ^Stream_Context, encode_byte: u8, pc_rel_base: u64) -> (_val: u64, _ok: bool) {
+	Num :: union { i64, u64, }
+	num := Num{}
+	
+	encoding := DWARF_Eh_Encoding(encode_byte & 0xF)
+
+	#partial switch encoding {
+	case .absptr:
+		val := stream_val(rdr, u64) or_return
+		num = u64(val)
+	case .sdata2:
+		val := stream_val(rdr, i16) or_return
+		num = i64(val)
+	case .sdata4:
+		val := stream_val(rdr, i32) or_return
+		num = i64(val)
+	case .sdata8:
+		val := stream_val(rdr, i64) or_return
+		num = i64(val)
+	case .udata2:
+		val := stream_val(rdr, u16) or_return
+		num = u64(val)
+	case .udata4:
+		val := stream_val(rdr, u32) or_return
+		num = u64(val)
+	case .udata8:
+		val := stream_val(rdr, u64) or_return
+		num = u64(val)
+	case:
+		fmt.printf("Unhandled FDE encoding! %v\n", encoding)
+		return
+	}
+
+
+	base : u64 = 0
+
+	modifiers := encode_byte & (~u8(0xF))
+	if modifiers & u8(DWARF_Eh_Modifier.pcrel) != 0 {
+		base = pc_rel_base
+	}
+
+	addr : u64 = 0
+	switch v in num {
+	case i64:
+		addr = u64(i64(base) + v)
+	case u64:
+		addr = base + v
+	}
+
+	return addr, true
+}
+
+add_unwind_op :: proc(ops: ^[dynamic]DWARF_Unwind_Entry, op: DWARF_Unwind_Entry) -> bool {
+	if op.cfa_reg_idx == -1 {
+		return false
+	}
+
+	non_zero_append(ops, op)
+	return true
+}
+
+process_cfa_ops :: proc(start_addr: u64, size: u64, data_align: i64, initial_ops: []u8, fde_ops: []u8) -> (_ops: []DWARF_Unwind_Entry, _ok: bool) {
+	end_addr := start_addr + size
+
+	unwind_ops := make([dynamic]DWARF_Unwind_Entry)
+	unwind_op := DWARF_Unwind_Entry{
+		entry_offset = start_addr,
+		cfa_reg_idx = -1,
+		fp_reg_idx = -1,
+	}
+
+	ops_arr := [][]u8{initial_ops, fde_ops}
+
+	//fmt.printf("ops for 0x%08x -> 0x%08x\n", start_addr, end_addr)
+	for i := 0; i < 2; i += 1 {
+		cfa_ops := ops_arr[i]
+
+		rdr := stream_init(cfa_ops)
+		for rdr.idx < len(cfa_ops) {
+			op := stream_val(&rdr, u8) or_return
+			if op == 0 { continue }
+
+			hi_bits := op >> 6
+			if hi_bits > 0 {
+				cfa_op := DWARF_CFA_hi(hi_bits)
+				low_val := (op << 2) >> 2
+				#partial switch cfa_op {
+				case .advance_loc:
+					//fmt.printf("%v | delta: %v\n", cfa_op, low_val)
+
+					add_unwind_op(&unwind_ops, unwind_op) or_return
+					unwind_op.entry_offset += u64(low_val)
+				case .offset:
+					reg := low_val
+					off := stream_uleb(&rdr) or_return
+					//fmt.printf("%v | register: %v, offset: %v\n", cfa_op, low_val, off)
+
+					if reg == 29 {
+						unwind_op.fp_reg_idx = i8(reg)
+						unwind_op.fp_reg_off = i64(off) * data_align
+					}
+				case .restore:
+					//fmt.printf("%v | register: %v\n", cfa_op, low_val)
+				case:
+					fmt.printf("Invalid op: %v\n", cfa_op)
+					return
+				}
+				
+			} else if hi_bits == 0 {
+				cfa_op := DWARF_CFA(op)
+				#partial switch cfa_op {
+				case .def_cfa:
+					reg := stream_uleb(&rdr) or_return
+					off := stream_uleb(&rdr) or_return
+					//fmt.printf("%v | register: %v, offset: 0x%08x\n", cfa_op, reg, off)
+					unwind_op.cfa_reg_idx = i8(reg)
+					unwind_op.cfa_reg_off = i64(off)
+				case .def_cfa_offset:
+					off := stream_uleb(&rdr) or_return
+					//fmt.printf("%v | offset: 0x%08x\n", cfa_op, off)
+
+					unwind_op.cfa_reg_off = i64(off)
+				case .def_cfa_register:
+					reg := stream_uleb(&rdr) or_return
+					//fmt.printf("%v | register: %v\n", cfa_op, reg)
+
+					unwind_op.cfa_reg_idx = i8(reg)
+				case .offset_extended:
+					reg := stream_uleb(&rdr) or_return
+					off := stream_uleb(&rdr) or_return
+//					fmt.printf("register: %v, offset: 0x%08x\n", reg, off)
+
+					if reg == 29 {
+						unwind_op.fp_reg_idx = i8(reg)
+						unwind_op.fp_reg_off = i64(off) * data_align
+					}
+				case .offset_extended_sf:
+					reg := stream_uleb(&rdr) or_return
+					off := stream_ileb(&rdr) or_return
+
+					if reg == 29 {
+						unwind_op.fp_reg_idx = i8(reg)
+						unwind_op.fp_reg_off = i64(off) * data_align
+					}
+				case .advance_loc1:
+					dt := stream_val(&rdr, u8) or_return
+					//fmt.printf("%v | delta: %v\n", cfa_op, dt)
+
+					add_unwind_op(&unwind_ops, unwind_op) or_return
+					unwind_op.entry_offset += u64(dt)
+				case .advance_loc2:
+					dt := stream_val(&rdr, u16) or_return
+					//fmt.printf("%v | delta: %v\n", cfa_op, dt)
+
+					add_unwind_op(&unwind_ops, unwind_op) or_return
+					unwind_op.entry_offset += u64(dt)
+				case .advance_loc4:
+					dt := stream_val(&rdr, u32) or_return
+					//fmt.printf("%v | delta: %v\n", cfa_op, dt)
+
+					add_unwind_op(&unwind_ops, unwind_op) or_return
+					unwind_op.entry_offset += u64(dt)
+				case .remember_state: //fmt.printf("%v\n", cfa_op)
+				case .restore_state: //fmt.printf("%v\n", cfa_op)
+				case .restore_extended: 
+					reg := stream_uleb(&rdr) or_return
+					//fmt.printf("%v | register: %v\n", cfa_op, reg)
+				case .def_cfa_expression:
+					len := stream_uleb(&rdr) or_return
+					expr := stream_bytes(&rdr, int(len)) or_return
+/*
+					fmt.printf("expression: %v\n", expr)
+*/
+				case:
+					fmt.printf("Unhandled op: %v\n", cfa_op)
+					return
+				}
+			}
+		}
+	}
+
+	add_unwind_op(&unwind_ops, unwind_op) or_return
+	return unwind_ops[:], true
+}
+
+process_unwind_info :: proc(trace: ^Trace, eh_frame: []u8, eh_frame_base: u64) -> (_unwind: DWARF_Unwind_Info, _ok: bool) {
+	rdr := stream_init(eh_frame)
+
+	unwind := DWARF_Unwind_Info{
+		offset_to_cie = make(map[u64]DWARF_CIE),
+		offset_to_fde = make(map[u64]DWARF_FDE),
+	}
+
+	for rdr.idx < len(eh_frame) {
+		cie_start := rdr.idx
+		length := stream_val(&rdr, u32) or_return
+		if length == 0xFFFF_FFFF {
+			fmt.printf("Only supporting DWARF32 for now!\n")
+			return
+		}
+		if length == 0 { break }
+
+		cie_end := cie_start + size_of(u32) + int(length)
+
+		cie_id := stream_val(&rdr, u32) or_return
+		if cie_id == 0 {
+			version := stream_val(&rdr, u8) or_return
+			if version != 1 {
+				fmt.printf("TODO: version 3 CIE not yet handled\n")
+				return
+			}
+
+			aug_cstr := stream_cstring(&rdr) or_return
+
+			code_align := stream_uleb(&rdr) or_return
+			data_align := stream_ileb(&rdr) or_return
+
+			ret_addr_reg := stream_val(&rdr, u8) or_return
+
+			aug_str := string(aug_cstr)
+
+			if len(aug_str) == 0 {
+				fmt.printf("TODO: empty aug string?\n")
+				return
+			}
+
+			if aug_str[0] != 'z' {
+				fmt.printf("TODO: handle aug string without length!\n")
+			}
+
+			aug_length := stream_uleb(&rdr) or_return
+
+			addr_encode_byte := u8(0)
+			for ch in aug_str[1:] {
+				switch ch {
+				case 'P':
+					fde_personality_byte := stream_val(&rdr, u8) or_return
+					personality_addr := pull_fde_encoded_val(&rdr, fde_personality_byte, eh_frame_base + u64(rdr.idx)) or_return
+				case 'R':
+					addr_encode_byte = stream_val(&rdr, u8) or_return
+
+				case 'L':
+					fde_lsda_byte := stream_val(&rdr, u8) or_return
+				case:
+					fmt.printf("TODO: handle fancier aug strings %v\n", ch)
+					return
+				}
+			}
+
+/*
+			addr_encoding := DWARF_Eh_Encoding(addr_encode_byte & 0xF)
+			fmt.printf("0x%08x | CIE, version: %v, aug: %s, code_align: %v, data_align: %v, ret_addr_reg: %v, fde addr: %v\n",
+				cie_start, version, aug_str, code_align, data_align, ret_addr_reg,
+				addr_encoding,
+			)
+*/
+
+			cie := DWARF_CIE{
+				code_align    = code_align,
+				data_align    = data_align,
+				ret_addr_reg  = ret_addr_reg,
+				addr_encoding = addr_encode_byte,
+				cfa_ops       = eh_frame[rdr.idx:cie_end],
+			}
+			unwind.offset_to_cie[u64(cie_start) + size_of(u32)] = cie
+		} else {
+			cie_offset_s := i64(rdr.idx) - i64(cie_id)
+			if cie_offset_s < 0 {
+				fmt.printf("Invalid CIE offset! %v\n", cie_offset_s)
+				return
+			}
+			cie_offset := u64(cie_offset_s)
+
+			cie := unwind.offset_to_cie[cie_offset]
+
+			fde_start_addr := pull_fde_encoded_val(&rdr, cie.addr_encoding, eh_frame_base + u64(rdr.idx)) or_return
+			fde_start_size := pull_fde_encoded_val(&rdr, cie.addr_encoding, 0) or_return
+
+			aug_data_len := stream_uleb(&rdr) or_return
+			stream_skip(&rdr, int(aug_data_len))
+
+/*
+			fmt.printf("0x%08x | FDE 0x%08x -> 0x%08x, CIE[0x%08x]: %#v, aug len: %v\n",
+				cie_start, fde_start_addr, fde_start_addr + fde_start_size, cie_offset, cie, aug_data_len,
+			)
+*/
+
+			fde_ops := eh_frame[rdr.idx:cie_end]
+			unwind_ops, ok := process_cfa_ops(fde_start_addr, fde_start_size, cie.data_align, cie.cfa_ops, fde_ops)
+			if !ok {
+				return
+			}
+
+			fde := DWARF_FDE{
+				cie_offset = cie_offset,
+				start_addr = fde_start_addr,
+				end_addr   = fde_start_addr + fde_start_size,
+				ops        = unwind_ops,
+			}
+			unwind.offset_to_fde[u64(cie_start)] = fde
+		}
+		
+		stream_set(&rdr, cie_end)
+	}
+
+	return unwind, true
 }
 
 process_line_info :: proc(trace: ^Trace, ctx: ^DWARF_Context, cu_files_list: ^[dynamic]CU_Files_Unit, cu_file_map: ^map[CU_File_Entry]string) -> bool {

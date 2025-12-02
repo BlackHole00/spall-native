@@ -319,6 +319,7 @@ load_macho :: proc(trace: ^Trace, _exec_buffer: []u8, bucket: ^Func_Bucket) -> b
 		if cmd.type == .Segment_64 {
 			segment_header := slice_to_type(current_buffer, Mach_Segment_64_Command) or_return
 			segment_name := strings.string_from_null_terminated_ptr(raw_data(segment_header.name[:]), 16)
+			fmt.printf("segment: %v\n", segment_name)
 			if segment_name == "__TEXT" {
 				text_segment_offset = segment_header.address
 			}

@@ -44,6 +44,10 @@ foreign abi {
 	@(link_name="__cxa_demangle") _cxa_demangle :: proc(name: rawptr, out_buf: rawptr, len: rawptr, status: rawptr) -> cstring ---
 }
 
+foreign {
+	@(link_name="mach_error_string") mach_error_string :: proc(val: u32) -> cstring ---
+}
+
 demangle_symbol :: proc(name: string, tmp_buffer: []u8) -> (string, bool) {
 	name_cstr := strings.clone_to_cstring(name, context.temp_allocator)
 

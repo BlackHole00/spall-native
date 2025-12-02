@@ -29,6 +29,11 @@ push_fatal :: proc(err: SpallError, loc := #caller_location) -> ! {
 	// os.exit(1)
 }
 
+log2_uint :: proc(#any_int v: uint) -> uint {
+	if v == 0 { return 0 }
+	return (8 * size_of(v)) - intrinsics.count_leading_zeros(v) - 1
+}
+
 rand_int :: proc(min, max: int) -> int {
     return int(rand.int31()) % (max-min) + min
 }

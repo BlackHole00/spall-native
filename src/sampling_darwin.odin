@@ -29,7 +29,8 @@ ARM_Compact_Unwind_Op :: struct {
 	addr: u32,
 	len: u32,
 
-	stack_size: u64,
+	stack_size: u32,
+	fde_offset: u32,
 }
 
 Mach_Recv_Msg :: struct {
@@ -148,12 +149,40 @@ sample_arm64_thread :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: d
 
 	non_zero_append(&sample_thread.samples, Sample{ts = i64(ts), callstack = make([dynamic]u64)})
 	callstack := &sample_thread.samples[len(sample_thread.samples)-1].callstack
+	callstack_info := make([dynamic]string)
+	dump_callstack := false
+	defer {
+		if dump_callstack {
+			fmt.printf("callstack\n")
+			for entry, idx in callstack {
+				func_name_idx, ok := get_function_name(trace, entry)
+				func_name := "(unknown)"
+				if ok {
+					func_name = in_getstr(&trace.string_block, func_name_idx)
+				}
+
+				if idx < len(callstack_info) {
+					info_str := callstack_info[idx]
+					fmt.printf("0x%08x - %s - %s\n", entry, func_name, info_str) 
+				} else {
+					fmt.printf("0x%08x - %s - ?\n", entry, func_name) 
+				}
+			}
+		}
+		delete(callstack_info)
+	}
 
 	sp := state.sp
 	fp := state.fp
 	pc := state.pc
 
 	walk_loop: for {
+		if pc & (0x1 << 63) != 0 {
+			dump_callstack = true
+			fmt.printf("callstack is fucked? Got PC: 0x%08x\n", pc)
+			return
+		}
+
 		if pc == 0 {
 			//fmt.printf("Finished stack scan?\n")
 			break walk_loop
@@ -168,8 +197,10 @@ sample_arm64_thread :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: d
 			break walk_loop
 		}
 
+		default_op := ARM_Compact_Unwind_Op{type = .None}
+
 		unwind_op : ^ARM_Compact_Unwind_Op = nil
-		for &entry in cur_bucket.unwind_info {
+		for &entry in cur_bucket.darwin_unwind_info {
 			check_addr := cur_bucket.base_address + u64(entry.addr)
 			if pc >= check_addr && pc <= (check_addr + u64(entry.len)) {
 				unwind_op = &entry
@@ -180,13 +211,20 @@ sample_arm64_thread :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: d
 		}
 
 		if unwind_op == nil {
-//			fmt.printf("no unwind op found?\n")
-			break walk_loop
+			unwind_op = &default_op
 		}
+
+		append(&callstack_info, fmt.tprintf("%v", unwind_op.type))
+
+/*
+		if unwind_op.type == .None && len(callstack) == 1 {
+			dump_callstack = true
+		}
+*/
 
 		#partial switch unwind_op.type {
 		case .Frameless: 
-			pc_slot_addr := state.lr + 8
+			pc_slot_addr := fp + 8
 			pc_slot, ok := map_child_mem(my_task, child_task, pc_slot_addr, u64)
 			if !ok {
 				//fmt.printf("failed to map mem: %x\n", pc_slot_addr)
@@ -214,6 +252,78 @@ sample_arm64_thread :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: d
 
 			pc = (^u64)(uintptr(pc_slot))^
 			fp = (^u64)(uintptr(fp_slot))^
+		case .DWARF:
+			fde := cur_bucket.dwarf_unwind_info.offset_to_fde[u64(unwind_op.fde_offset)]
+			cie := cur_bucket.dwarf_unwind_info.offset_to_cie[fde.cie_offset]
+			addr_off := pc - fde.start_addr
+			//fmt.printf("Doing DWARF lookup | pc: 0x%08x, fde: 0x%08x, path: %s\n", pc, unwind_op.fde_offset, cur_bucket.source_path)
+			//fmt.printf("using CIE[0x%08x] - FDE[0x%08x]: 0x%08x -> 0x%08x, ret reg: %v\n", fde.cie_offset, unwind_op.fde_offset, fde.start_addr, fde.end_addr, cie.ret_addr_reg)
+
+			unwind_rule_idx := 0
+			for op, idx in fde.ops {
+			//	fmt.printf("0x%08x | considering rule: 0x%08x - CFA: %v + %v, FP: %v + %v\n", pc, op.entry_offset, op.cfa_reg_idx, op.cfa_reg_off, op.fp_reg_idx, op.fp_reg_off)
+				if pc >= op.entry_offset && idx > 0 {
+					unwind_rule_idx = idx
+					break
+				}
+			}
+
+			unwind_rule := fde.ops[unwind_rule_idx]
+
+			read_reg : u64 = 0
+			switch unwind_rule.cfa_reg_idx {
+			case 0..=28: read_reg = state.x[unwind_rule.cfa_reg_idx]
+			case 29:     read_reg = fp
+			case 30:     read_reg = state.lr
+			case 31:     read_reg = sp
+			case 32:     read_reg = pc
+			}
+
+			fp_reg_val : u64 = 0
+			if unwind_rule.fp_reg_idx > -1 {
+				switch unwind_rule.fp_reg_idx {
+				case 0..=28: fp_reg_val = state.x[unwind_rule.fp_reg_idx]
+				case 29:     fp_reg_val = fp
+				case 30:     fp_reg_val = state.lr
+				case 31:     fp_reg_val = sp
+				case 32:     fp_reg_val = pc
+				}
+			}
+
+		//	fmt.printf("using rule: 0x%08x - CFA: %v + %v, FP: %v + %v\n", unwind_rule.entry_offset, unwind_rule.cfa_reg_idx, unwind_rule.cfa_reg_off, unwind_rule.fp_reg_idx, unwind_rule.fp_reg_off)
+
+			cfa_slot_addr := u64(i64(read_reg) + unwind_rule.cfa_reg_off)
+			pc_slot_addr := cfa_slot_addr - 8
+		//	fmt.printf("CFA value: 0x%08x, CFA addr: 0x%08x, FP value: 0x%08x\n", read_reg, pc_slot_addr, fp)
+
+			pc_slot, ok := map_child_mem(my_task, child_task, pc_slot_addr, u64)
+			if !ok {
+				//fmt.printf("failed to map mem: %x\n", pc_slot_addr)
+				break walk_loop
+			}
+			defer unmap_child_mem(my_task, pc_slot_addr, pc_slot)
+			new_pc := (^u64)(uintptr(pc_slot))^
+
+			if fp_reg_val > 0 && unwind_rule.cfa_reg_idx == unwind_rule.fp_reg_idx {
+				fp_slot_addr := u64(i64(cfa_slot_addr) + unwind_rule.fp_reg_off)
+
+				fp_slot, ok := map_child_mem(my_task, child_task, fp_slot_addr, u64)
+				if !ok {
+					//fmt.printf("failed to map mem: %x\n", fp_slot_addr)
+					break walk_loop
+				}
+				defer unmap_child_mem(my_task, fp_slot_addr, fp_slot)
+				new_fp := (^u64)(uintptr(fp_slot))^
+				fp = new_fp
+				if fp < 0x1000 {
+					fmt.printf("invalid fp: 0x%08x\n", fp)
+					dump_callstack = true
+					return
+				}
+			}
+
+		//	fmt.printf("pc: 0x%08x, fp: 0x%08x\n", new_pc, fp)
+			pc = new_pc
 
 		// We don't have a rule, so we're gonna YOLO things.
 		case .None:
@@ -248,46 +358,10 @@ sample_arm64_thread :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: d
 		}
 	}
 
-	return true
-
-/*
-	//fmt.printf("starting sample\n")
-	fp := state.fp
-	sp := state.sp
-	pc := state.pc
-	for {
-		//fmt.printf("pc: %x | sp: %x | fp: %x\n", pc, sp, fp)
-
-		// If the frame pointer is 0, we're at the top of the stack
-		if fp == 0 {
-			return true
-		}
-
-		// base pointer should be aligned
-		if fp % 8 != 0 {
-			return false
-		}
-
-		slot, ok := map_child_mem(my_task, child_task, fp, u64)
-		if !ok {
-			fmt.printf("failed to map mem: %x\n", fp)
-			return false
-		}
-
-		non_zero_append(callstack, fp)
-		cur_depth += 1
-		sample_thread.max_depth = max(sample_thread.max_depth, cur_depth)
-
-		new_fp := (^u64)(uintptr(slot))^
-		pc = (^u64)(uintptr(u64(uintptr(slot)) + 8))^
-		sp = u64(uintptr(slot) + 16)
-		unmap_child_mem(my_task, fp, slot)
-
-		fp = new_fp
-	}
-
-    return true
-*/
+	//if !dump_callstack {
+		_ok = true
+	//}
+	return
 }
 
 sample_x86_thread :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.task_t, thread: darwin.thread_act_t, ts: u64, sample_thread: ^Sample_Thread) -> (ok: bool) {
@@ -354,11 +428,6 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 	is_dylib := (header.file_type == MACH_FILETYPE_DYLIB)
 	in_shared_cache := (header.flags & MACH_DYLIB_IN_CACHE) != 0
 
-	blank_uuid := UUID{}
-	if in_shared_cache && sample_state.shared_cache_uuid != blank_uuid {
-		return true
-	}
-
 	uuid_cmd := Mach_UUID_Command{}
 	symtab_cmd := Mach_Symtab_Command{}
 	header_and_cmds := map_child_slice(my_task, child_task, load_addr, header_and_cmds_size) or_return
@@ -368,8 +437,13 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 
 	text_seg := Segment_Range{}
 	linkedit_seg := Segment_Range{}
+
 	unwind_seg := Segment_Range{}
 	has_unwind_info := false
+
+	eh_frame_seg := Segment_Range{}
+	has_eh_frame := false
+
 	uuid := [16]u8{}
 
 	func_starts_hdr := Mach_Linkedit_Data_Command{}
@@ -428,6 +502,14 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 						mem_size  = section.size,
 					}
 					has_unwind_info = true
+				} else if section_name == "__eh_frame" {
+					eh_frame_seg = Segment_Range{
+						file_off  = u64(section.offset),
+						file_size = section.size,
+						mem_off   = u64(section.address) + mem_skew,
+						mem_size  = section.size,
+					}
+					has_eh_frame = true
 				} else if section_name == "__text" {
 					text_sect_idx = sect_count
 				}
@@ -468,6 +550,7 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 	if found_uuid {
 		return true
 	}
+	//fmt.printf("loading %v\n", file_path)
 
 	load_skew : u64 = 0
 	if !in_shared_cache {
@@ -493,6 +576,19 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 		return false
 	}
 	defer unmap_child_slice(my_task, string_table_addr, string_table)
+
+	dwarf_unwind_info := DWARF_Unwind_Info{}
+	if has_eh_frame {
+		eh_frame_addr := load_skew + eh_frame_seg.mem_off
+		eh_frame_bytes, ok := map_child_slice(my_task, child_task, eh_frame_addr, eh_frame_seg.mem_size)
+		if !ok {
+			fmt.printf("invalid unwind info addr 0x%016x for %s\n", eh_frame_addr, file_path)
+			return false
+		}
+		defer unmap_child_slice(my_task, eh_frame_addr, eh_frame_bytes)
+
+		dwarf_unwind_info = process_unwind_info(trace, eh_frame_bytes, eh_frame_addr) or_return
+	}
 
 	unwind_table := make([dynamic]ARM_Compact_Unwind_Op)
 	if has_unwind_info {
@@ -562,7 +658,10 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 					#partial switch unwind_op_type {
 					case .Frameless:
 						stack_size := ((op >> 12) & 0xFFF) * 16
-						cfi_op.stack_size = u64(stack_size)
+						cfi_op.stack_size = u32(stack_size)
+					case .DWARF:
+						fde_offset := (op << 8) >> 8
+						cfi_op.fde_offset = fde_offset
 					}
 
 					non_zero_append(&unwind_table, cfi_op)
@@ -596,7 +695,10 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 					#partial switch unwind_op_type {
 					case .Frameless:
 						stack_size := ((op >> 12) & 0xFFF) * 16
-						cfi_op.stack_size = u64(stack_size)
+						cfi_op.stack_size = u32(stack_size)
+					case .DWARF:
+						fde_offset := (op << 8) >> 8
+						cfi_op.fde_offset = fde_offset
 					}
 
 					non_zero_append(&unwind_table, cfi_op)
@@ -627,7 +729,8 @@ process_object :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 		base_address = load_addr
 	}
 	bucket := new_func_bucket(&trace.func_buckets, strings.clone(file_path), base_address)
-	bucket.unwind_info = unwind_table[:]
+	bucket.darwin_unwind_info = unwind_table[:]
+	bucket.dwarf_unwind_info = dwarf_unwind_info
 
 	text_start := text_seg.mem_start
 	text_end := text_seg.mem_end
@@ -759,6 +862,13 @@ process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 	image_infos := map_child_mem(my_task, child_task, dyld_info.all_image_info_addr, darwin.dyld_all_image_infos) or_return
 	defer unmap_child_mem(my_task, dyld_info.all_image_info_addr, image_infos)
 
+	prev_loaded_dyld := sample_state.processed_dyld
+	defer {
+		if prev_loaded_dyld != sample_state.processed_dyld {
+			fmt.printf("Finished initial dylib load!\n")
+		}
+	}
+
 	tmp_buffer := make([]u8, 1024*1024, context.temp_allocator)
 	if !sample_state.processed_dyld {
 		dyld_file_path_addr := u64(uintptr(rawptr(image_infos.dyld_path)))
@@ -829,6 +939,10 @@ process_dylibs :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin
 }
 
 sample_task :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.task_t, child_pid: posix.pid_t, sample_state: ^Sample_State) -> (_ok: bool) {
+	if trace.requested_stop {
+		return
+	}
+
 	ts := time.read_cycle_counter()
 	if darwin.task_suspend(child_task) != .Success {
 		return
@@ -841,6 +955,7 @@ sample_task :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.ta
 	}
 
 	if !process_dylibs(trace, my_task, child_task, sample_state) {
+		fmt.printf("failed to load dylibs?\n")
 		return
 	}
 
@@ -851,11 +966,13 @@ sample_task :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.ta
 	}
 
 	//fmt.printf("0x%08x | sampling %v threads\n", ts, thread_count)
+	sample_ok := false
 	for i : u32 = 0; i < thread_count; i += 1 {
 		thread := thread_list[i]
 
 		id_info := darwin.thread_identifier_info{}
 		count : u32 = darwin.THREAD_IDENTIFIER_INFO_COUNT
+
 		if darwin.thread_info(thread, darwin.THREAD_IDENTIFIER_INFO, &id_info, &count) != .Success {
 			continue
 		}
@@ -868,12 +985,15 @@ sample_task :: proc(trace: ^Trace, my_task: darwin.task_t, child_task: darwin.ta
 
 		//fmt.printf("%d | %016d ", i, id_info.thread_id)
 		if ODIN_ARCH == .amd64 {
-			sample_x86_thread(trace, my_task, child_task, thread, ts, sample_thread) or_return
+			sample_ok = sample_x86_thread(trace, my_task, child_task, thread, ts, sample_thread)
         } else if ODIN_ARCH == .arm64 {
-            sample_arm64_thread(trace, my_task, child_task, thread, ts, sample_thread) or_return
+            sample_ok = sample_arm64_thread(trace, my_task, child_task, thread, ts, sample_thread)
 		} else {
 			fmt.printf("don't support yet!\n")
-			continue
+		}
+
+		if !sample_ok {
+			fmt.printf("failed sample of thread %v\n", id_info.thread_id)
 		}
 	}
 
@@ -887,158 +1007,7 @@ MachSampleSetup :: struct {
 	bootstrap_port: darwin.mach_port_t,
 }
 
-sample_setup := MachSampleSetup{}
-sample_child :: proc(trace: ^Trace, program_name: string, path: string, args: []string) -> (ok: bool) {
-	if !sample_setup.has_setup {
-		sample_setup.my_task = darwin.task_t(darwin.mach_task_self())
-		if darwin.mach_port_allocate(sample_setup.my_task, .Receive, &sample_setup.recv_port) != .Success {
-			fmt.printf("failed to allocate port\n")
-			return
-		}
-
-		if darwin.task_get_special_port(sample_setup.my_task, i32(darwin.Task_Port_Type.Bootstrap), &sample_setup.bootstrap_port) != .Success {
-			fmt.printf("failed to get special port\n")
-			return
-		}
-
-		right: darwin.mach_port_t
-		acquired_right: darwin.mach_port_t
-		if darwin.mach_port_extract_right(sample_setup.my_task, u32(sample_setup.recv_port), u32(darwin.Msg_Type.Make_Send), &right, &acquired_right) != .Success {
-			fmt.printf("failed to get right\n")
-			return
-		}
-
-		k_err := darwin.bootstrap_register2(sample_setup.bootstrap_port, "SPALL_BOOTSTRAP", right, 0)
-		if k_err != .Success {
-			fmt.printf("failed to register bootstrap | got: %v\n", k_err)
-			return
-		}
-
-		sample_setup.has_setup = true
-	}
-
-	env_vars, e_err := os2.environ(context.temp_allocator)
-    if e_err != nil {
-        fmt.printf("Failed to get environ %v\n", e_err)
-        return
-    }
-	envs := make([dynamic]string, len(env_vars)+1, context.temp_allocator)
-	i := 0
-	for ; i < len(env_vars); i += 1 {
-		envs[i] = string(env_vars[i])
-	}
-
-	dir, err := os2.get_working_directory(context.temp_allocator)
-	if err != nil { return }
-
-	if path != "" {
-		err = os2.set_working_directory(path)
-		if err != nil { return }
-	}
-
-	envs[i] = fmt.tprintf("DYLD_INSERT_LIBRARIES=%s/tools/osx_dylib_sample/%s", dir, "same.dylib")
-
-	child_pid, err2 := spawn(program_name, args, envs[:], nil, nil, true)
-	if err2 != nil {
-		fmt.printf("failed to spawn: %s | %v\n", program_name, err2)
-		return
-	}
-	fmt.printf("Spawned %s @ %v\n", program_name, child_pid)
-
-	buffer := [4096]u8{}
-	darwin.proc_pidpath(child_pid, raw_data(buffer[:]), len(buffer))
-	real_path := string(cstring(raw_data(buffer[:])))
-
-	initial_timeout: u32 = 500 // ms
-
-	// Get the Child's task and port
-	recv_msg := Mach_Recv_Msg{}
-	if darwin.mach_msg(&recv_msg, {.Receive_Msg, .Receive_Timeout}, 0, size_of(recv_msg), sample_setup.recv_port, initial_timeout, 0) != .Success {
-		fmt.printf("failed to get child task\n")
-		return
-	}
-	child_task := recv_msg.task_port.name
-
-	if darwin.mach_msg(&recv_msg, {.Receive_Msg, .Receive_Timeout}, 0, size_of(recv_msg), sample_setup.recv_port, initial_timeout, 0) != .Success {
-		fmt.printf("failed to get child port\n")
-		return
-	}
-	child_port := recv_msg.task_port.name
-
-	// Send the all clear
-	send_msg := Mach_Send_Msg{}
-	send_msg.header.msgh_remote_port = child_port
-	send_msg.header.msgh_local_port = 0
-	send_msg.header.msgh_bits = u32(darwin.Msg_Type.Copy_Send) | u32(darwin.Msg_Header_Bits.Complex)
-	send_msg.header.msgh_size = size_of(send_msg)
-
-	send_msg.body.msgh_descriptor_count = 1
-	send_msg.task_port.name = sample_setup.my_task
-	send_msg.task_port.disposition = u32(darwin.Msg_Type.Copy_Send)
-	send_msg.task_port.type = darwin.MACH_MSG_PORT_DESCRIPTOR
-	if darwin.mach_msg_send(&send_msg) != .Success {
-		fmt.printf("failed to send all-clear to child\n")
-		return
-	}
-
-	fmt.printf("Resuming child\n")
-
-	sample_state := Sample_State{}
-	sample_state.threads = make(map[u64]Sample_Thread)
-	sample_state.program_path = real_path
-	sample_state.dylib_uuid_to_bucket = make(map[UUID]^Func_Bucket)
-
-	init_trace_allocs(trace, program_name)
-
-	for !trace.requested_stop {
-		if !sample_task(trace, sample_setup.my_task, child_task, child_pid, &sample_state) {
-			break
-		}
-		time.sleep(1 * time.Millisecond)
-	}
-	trailing_ts := time.read_cycle_counter()
-
-	// Pause after done
-	{
-		darwin.task_suspend(child_task)
-/*
-		status: i32 = 0
-		posix.waitpid(child_pid, &status, nil)
-
-		for !posix.WIFEXITED(status) && posix.WIFSIGNALED(status) {
-			if posix.waitpid(child_pid, &status, nil) == -1 {
-				fmt.printf("failed to wait on child\n")
-				return
-			}
-		}
-*/
-	}
-
-	if trace.requested_stop {
-/*
-		posix.kill(child_pid, .SIGTERM)
-		darwin.task_terminate(child_task)
-*/
-
-	// Wait for the program to fully finish
-	} else {
-		fmt.printf("waiting for wrap\n")
-
-		status: i32 = 0
-		posix.waitpid(child_pid, &status, nil)
-
-		for !posix.WIFEXITED(status) && posix.WIFSIGNALED(status) {
-			if posix.waitpid(child_pid, &status, nil) == -1 {
-				fmt.printf("failed to wait on child\n")
-				return
-			}
-		}
-    }
-
-	freq, _ := time.tsc_frequency()
-
-	trace.stamp_scale = ((1 / f64(freq)) * 1_000_000_000)
-
+collate_sample_stacks :: proc(trace: ^Trace, sample_state: ^Sample_State, trailing_ts: u64) {
 	proc_idx := setup_pid(trace, 0)
 	process := &trace.processes[proc_idx]
 
@@ -1155,6 +1124,162 @@ sample_child :: proc(trace: ^Trace, program_name: string, path: string, args: []
 			process.min_time = min(process.min_time, cur_sample.ts)
 		}
 	}
+}
+
+sample_setup := MachSampleSetup{}
+sample_child :: proc(trace: ^Trace, program_name: string, path: string, args: []string) -> (ok: bool) {
+	if !sample_setup.has_setup {
+		sample_setup.my_task = darwin.task_t(darwin.mach_task_self())
+		if darwin.mach_port_allocate(sample_setup.my_task, .Receive, &sample_setup.recv_port) != .Success {
+			fmt.printf("failed to allocate port\n")
+			return
+		}
+
+		if darwin.task_get_special_port(sample_setup.my_task, i32(darwin.Task_Port_Type.Bootstrap), &sample_setup.bootstrap_port) != .Success {
+			fmt.printf("failed to get special port\n")
+			return
+		}
+
+		right: darwin.mach_port_t
+		acquired_right: darwin.mach_port_t
+		if darwin.mach_port_extract_right(sample_setup.my_task, u32(sample_setup.recv_port), u32(darwin.Msg_Type.Make_Send), &right, &acquired_right) != .Success {
+			fmt.printf("failed to get right\n")
+			return
+		}
+
+		k_err := darwin.bootstrap_register2(sample_setup.bootstrap_port, "SPALL_BOOTSTRAP", right, 0)
+		if k_err != .Success {
+			fmt.printf("failed to register bootstrap | got: %v\n", k_err)
+			return
+		}
+
+		sample_setup.has_setup = true
+	}
+
+	env_vars, e_err := os2.environ(context.temp_allocator)
+    if e_err != nil {
+        fmt.printf("Failed to get environ %v\n", e_err)
+        return
+    }
+	envs := make([dynamic]string, len(env_vars)+1, context.temp_allocator)
+	i := 0
+	for ; i < len(env_vars); i += 1 {
+		envs[i] = string(env_vars[i])
+	}
+
+	dir, err := os2.get_working_directory(context.temp_allocator)
+	if err != nil { return }
+
+	if path != "" {
+		err = os2.set_working_directory(path)
+		if err != nil { return }
+	}
+
+	envs[i] = fmt.tprintf("DYLD_INSERT_LIBRARIES=%s/tools/osx_dylib_sample/%s", dir, "same.dylib")
+
+	child_pid, err2 := spawn(program_name, args, envs[:], nil, nil, true)
+	if err2 != nil {
+		fmt.printf("failed to spawn: %s | %v\n", program_name, err2)
+		return
+	}
+	fmt.printf("Spawned %s @ %v\n", program_name, child_pid)
+
+	buffer := [4096]u8{}
+	darwin.proc_pidpath(child_pid, raw_data(buffer[:]), len(buffer))
+	real_path := string(cstring(raw_data(buffer[:])))
+
+	initial_timeout: u32 = 500 // ms
+
+	// Get the Child's task and port
+	recv_msg := Mach_Recv_Msg{}
+	if darwin.mach_msg(&recv_msg, {.Receive_Msg, .Receive_Timeout}, 0, size_of(recv_msg), sample_setup.recv_port, initial_timeout, 0) != .Success {
+		fmt.printf("failed to get child task\n")
+		return
+	}
+	child_task := recv_msg.task_port.name
+
+	if darwin.mach_msg(&recv_msg, {.Receive_Msg, .Receive_Timeout}, 0, size_of(recv_msg), sample_setup.recv_port, initial_timeout, 0) != .Success {
+		fmt.printf("failed to get child port\n")
+		return
+	}
+	child_port := recv_msg.task_port.name
+
+	// Send the all clear
+	send_msg := Mach_Send_Msg{}
+	send_msg.header.msgh_remote_port = child_port
+	send_msg.header.msgh_local_port = 0
+	send_msg.header.msgh_bits = u32(darwin.Msg_Type.Copy_Send) | u32(darwin.Msg_Header_Bits.Complex)
+	send_msg.header.msgh_size = size_of(send_msg)
+
+	send_msg.body.msgh_descriptor_count = 1
+	send_msg.task_port.name = sample_setup.my_task
+	send_msg.task_port.disposition = u32(darwin.Msg_Type.Copy_Send)
+	send_msg.task_port.type = darwin.MACH_MSG_PORT_DESCRIPTOR
+	if darwin.mach_msg_send(&send_msg) != .Success {
+		fmt.printf("failed to send all-clear to child\n")
+		return
+	}
+
+	fmt.printf("Resuming child\n")
+
+	sample_state := Sample_State{}
+	sample_state.threads = make(map[u64]Sample_Thread)
+	sample_state.program_path = real_path
+	sample_state.dylib_uuid_to_bucket = make(map[UUID]^Func_Bucket)
+
+	init_trace_allocs(trace, program_name)
+
+	for !trace.requested_stop {
+		if !sample_task(trace, sample_setup.my_task, child_task, child_pid, &sample_state) {
+			fmt.printf("task failed?\n")
+			break
+		}
+		time.sleep(500 * time.Microsecond)
+	}
+	trailing_ts := time.read_cycle_counter()
+
+	// Pause after done
+	{
+		darwin.task_suspend(child_task)
+/*
+		status: i32 = 0
+		posix.waitpid(child_pid, &status, nil)
+
+		for !posix.WIFEXITED(status) && posix.WIFSIGNALED(status) {
+			if posix.waitpid(child_pid, &status, nil) == -1 {
+				fmt.printf("failed to wait on child\n")
+				return
+			}
+		}
+*/
+	}
+
+	if trace.requested_stop {
+/*
+		posix.kill(child_pid, .SIGTERM)
+		darwin.task_terminate(child_task)
+*/
+
+	// Wait for the program to fully finish
+	} else {
+		fmt.printf("waiting for wrap\n")
+
+		status: i32 = 0
+		posix.waitpid(child_pid, &status, nil)
+
+		for !posix.WIFEXITED(status) && posix.WIFSIGNALED(status) {
+			if posix.waitpid(child_pid, &status, nil) == -1 {
+				fmt.printf("failed to wait on child\n")
+				return
+			}
+		}
+    }
+
+	freq, _ := time.tsc_frequency()
+	trace.stamp_scale = ((1 / f64(freq)) * 1_000_000_000)
+
+	collate_sample_stacks(trace, &sample_state, trailing_ts)
+
 	fmt.printf("Sampled %v events\n", trace.event_count)
 
 	generate_color_choices(trace, false)
