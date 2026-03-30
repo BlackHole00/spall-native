@@ -5,8 +5,8 @@ package main
 import "base:runtime"
 
 import "core:fmt"
-import "core:os"
-import "core:os/os2"
+import os "core:os/old"
+import os2 "core:os"
 import "core:path/filepath"
 import "core:time"
 import "core:slice"

@@ -2,7 +2,7 @@
 package main
 
 import "core:fmt"
-import "core:os"
+import os "core:os/old"
 import "core:strings"
 
 import SDL "vendor:sdl2"

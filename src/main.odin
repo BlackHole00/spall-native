@@ -5,7 +5,7 @@ import "base:runtime"
 
 import "core:fmt"
 import "core:time"
-import "core:os"
+import os "core:os/old"
 import "core:mem"
 import "core:strings"
 import "core:math"

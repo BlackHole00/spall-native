@@ -1,6 +1,6 @@
 package main
 
-import "core:os"
+import os "core:os/old"
 import "core:fmt"
 import "core:strings"
 import "core:slice"

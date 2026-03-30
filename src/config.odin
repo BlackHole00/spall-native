@@ -2,7 +2,7 @@ package main
 
 import "base:runtime"
 
-import "core:os"
+import os "core:os/old"
 import "core:fmt"
 import "core:slice"
 import "core:bytes"

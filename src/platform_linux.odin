@@ -3,7 +3,7 @@ package main
 
 import "core:c"
 import "core:sys/unix"
-import "core:os"
+import os "core:os/old"
 import "core:fmt"
 import "core:strings"
 import "core:time"

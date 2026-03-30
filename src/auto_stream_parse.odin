@@ -6,7 +6,7 @@ import "core:fmt"
 import "core:strings"
 import "core:slice"
 import "core:mem"
-import "core:os"
+import os "core:os/old"
 import "core:math"
 import "formats:spall_fmt"
 

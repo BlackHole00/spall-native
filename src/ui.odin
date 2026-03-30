@@ -8,7 +8,7 @@ import "core:math"
 import "core:slice"
 import "core:strings"
 import "core:unicode/utf8"
-import "core:os"
+import os "core:os/old"
 
 import "core:prof/spall"
 
